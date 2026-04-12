@@ -35,12 +35,13 @@ A production-grade Kubernetes cluster running on Proxmox VMs, built to learn and
 | Nextcloud | Self-hosted cloud storage with PostgreSQL backend |
 
 ## Repository Structure
-apps/
-├── homepage/
-├── monitoring/
-├── nextcloud/
-├── uptime-kuma/
-└── vaultwarden/
+
+    apps/
+    ├── homepage/
+    ├── monitoring/
+    ├── nextcloud/
+    ├── uptime-kuma/
+    └── vaultwarden/
 
 ## Secrets Management
 
