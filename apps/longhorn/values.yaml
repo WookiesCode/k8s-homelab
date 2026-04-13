@@ -1,0 +1,12 @@
+defaultSettings:
+  defaultReplicaCount: 2
+  storageMinimalAvailablePercentage: 10
+
+ingress:
+  enabled: true
+  ingressClassName: nginx
+  host: longhorn.local
+  annotations:
+    cert-manager.io/cluster-issuer: selfsigned
+  tls: true
+  tlsSecret: longhorn-tls
