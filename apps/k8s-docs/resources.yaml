@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-docs
+  namespace: k8s-docs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: k8s-docs
+  template:
+    metadata:
+      labels:
+        app: k8s-docs
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: html
+              mountPath: /usr/share/nginx/html
+      volumes:
+        - name: html
+          configMap:
+            name: k8s-docs-html
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: k8s-docs
+  namespace: k8s-docs
+spec:
+  selector:
+    app: k8s-docs
+  ports:
+    - port: 80
+      targetPort: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: k8s-docs
+  namespace: k8s-docs
+  annotations:
+    cert-manager.io/cluster-issuer: selfsigned
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - k8s-docs.local
+      secretName: k8s-docs-tls
+  rules:
+    - host: k8s-docs.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: k8s-docs
+                port:
+                  number: 80
