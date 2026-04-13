@@ -9,10 +9,10 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - headlamp.local
+        - headlamp.lan
       secretName: headlamp-tls
   rules:
-    - host: headlamp.local
+    - host: headlamp.lan
       http:
         paths:
           - path: /

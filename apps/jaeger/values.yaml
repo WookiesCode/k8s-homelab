@@ -24,11 +24,11 @@ ingress:
   annotations:
     cert-manager.io/cluster-issuer: selfsigned
   hosts:
-    - host: jaeger.local
+    - host: jaeger.lan
       paths:
         - path: /
           pathType: Prefix
   tls:
     - secretName: jaeger-tls
       hosts:
-        - jaeger.local
+        - jaeger.lan

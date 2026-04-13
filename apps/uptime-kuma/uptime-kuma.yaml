@@ -70,10 +70,10 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - uptime-kuma.local
+        - uptime-kuma.lan
       secretName: uptime-kuma-tls
   rules:
-    - host: uptime-kuma.local
+    - host: uptime-kuma.lan
       http:
         paths:
           - path: /

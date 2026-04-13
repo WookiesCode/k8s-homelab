@@ -49,10 +49,10 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - k8s-docs.local
+        - k8s-docs.lan
       secretName: k8s-docs-tls
   rules:
-    - host: k8s-docs.local
+    - host: k8s-docs.lan
       http:
         paths:
           - path: /

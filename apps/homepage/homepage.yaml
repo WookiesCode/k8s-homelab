@@ -39,7 +39,7 @@ spec:
             - containerPort: 3000
           env:
             - name: HOMEPAGE_ALLOWED_HOSTS
-              value: "home.local"
+              value: "home.lan"
           volumeMounts:
             - name: config
               mountPath: /app/config
@@ -73,10 +73,10 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - home.local
+        - home.lan
       secretName: homepage-tls
   rules:
-    - host: home.local
+    - host: home.lan
       http:
         paths:
           - path: /

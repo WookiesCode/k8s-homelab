@@ -39,7 +39,7 @@ spec:
             - containerPort: 80
           env:
             - name: DOMAIN
-              value: "https://vaultwarden.local"
+              value: "https://vaultwarden.lan"
             - name: SIGNUPS_ALLOWED
               value: "false"
             - name: WEBSOCKET_ENABLED
@@ -77,10 +77,10 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - vaultwarden.local
+        - vaultwarden.lan
       secretName: vaultwarden-tls
   rules:
-    - host: vaultwarden.local
+    - host: vaultwarden.lan
       http:
         paths:
           - path: /

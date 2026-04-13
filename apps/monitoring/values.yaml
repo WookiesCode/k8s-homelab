@@ -9,11 +9,11 @@ grafana:
     annotations:
       cert-manager.io/cluster-issuer: selfsigned
     hosts:
-      - grafana.local
+      - grafana.lan
     tls:
       - secretName: grafana-tls
         hosts:
-          - grafana.local
+          - grafana.lan
 prometheus:
   prometheusSpec:
     retention: 7d

@@ -9,10 +9,10 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - jaeger.local
+        - jaeger.lan
       secretName: jaeger-tls
   rules:
-    - host: jaeger.local
+    - host: jaeger.lan
       http:
         paths:
           - path: /

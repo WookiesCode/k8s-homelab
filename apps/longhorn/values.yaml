@@ -5,7 +5,7 @@ defaultSettings:
 ingress:
   enabled: true
   ingressClassName: nginx
-  host: longhorn.local
+  host: longhorn.lan
   annotations:
     cert-manager.io/cluster-issuer: selfsigned
   tls: true

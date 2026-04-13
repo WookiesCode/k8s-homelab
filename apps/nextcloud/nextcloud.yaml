@@ -115,7 +115,7 @@ spec:
                   name: nextcloud-db-secret
                   key: POSTGRES_PASSWORD
             - name: NEXTCLOUD_TRUSTED_DOMAINS
-              value: "nextcloud.local"
+              value: "nextcloud.lan"
           volumeMounts:
             - name: nextcloud-data
               mountPath: /var/www/html
@@ -150,10 +150,10 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - nextcloud.local
+        - nextcloud.lan
       secretName: nextcloud-tls
   rules:
-    - host: nextcloud.local
+    - host: nextcloud.lan
       http:
         paths:
           - path: /
