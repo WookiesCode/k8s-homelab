@@ -11,7 +11,7 @@ data:
       "title": "Homelab Overview",
       "uid": "adghlr6",
       "schemaVersion": 42,
-      "version": 4,
+      "version": 5,
       "panels": [
         {
           "title": "Network I/O by Pod",
@@ -95,6 +95,35 @@ data:
             {
               "expr": "sum(rate(container_cpu_usage_seconds_total{container!=\"\"}[5m])) by (pod, namespace)",
               "legendFormat": "{{namespace}} / {{pod}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "title": "PVC Utilization",
+          "type": "gauge",
+          "id": 5,
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "orange", "value": 75 },
+                  { "color": "red", "value": 90 }
+                ]
+              }
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum(kubelet_volume_stats_used_bytes) by (persistentvolumeclaim) / sum(kubelet_volume_stats_capacity_bytes) by (persistentvolumeclaim) * 100",
+              "legendFormat": "{{persistentvolumeclaim}}",
               "refId": "A"
             }
           ]
