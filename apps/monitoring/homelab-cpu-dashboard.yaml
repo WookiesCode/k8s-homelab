@@ -8,24 +8,86 @@ metadata:
 data:
   homelab-overview.json: |
     {
-      "title": "Homelab Overview",
-      "uid": "adghlr6",
-      "schemaVersion": 42,
-      "version": 5,
+      "annotations": {
+        "list": [
+          {
+            "builtIn": 1,
+            "datasource": {
+              "type": "grafana",
+              "uid": "-- Grafana --"
+            },
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+          }
+        ]
+      },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "links": [],
       "panels": [
         {
-          "title": "Network I/O by Pod",
-          "type": "timeseries",
-          "id": 4,
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": 0 },
+                  { "color": "red", "value": 80 }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+          "id": 5,
+          "options": {
+            "minVizHeight": 75,
+            "minVizWidth": 75,
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            },
+            "showThresholdLabels": false,
+            "showThresholdMarkers": true,
+            "sizing": "auto"
+          },
+          "pluginVersion": "12.4.3",
+          "targets": [
+            {
+              "editorMode": "code",
+              "expr": "sum(kubelet_volume_stats_used_bytes) by (persistentvolumeclaim) / sum(kubelet_volume_stats_capacity_bytes) by (persistentvolumeclaim) * 100",
+              "legendFormat": "__auto",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "PVC Utilization",
+          "type": "gauge"
+        },
+        {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "fieldConfig": {
             "defaults": {
               "unit": "binBps",
-              "color": { "mode": "palette-classic" },
               "custom": { "drawStyle": "line", "fillOpacity": 10 }
             }
           },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "id": 4,
           "targets": [
             {
               "expr": "sum(irate(container_network_receive_bytes_total{pod!=\"\"}[5m])) by (pod, namespace)",
@@ -37,13 +99,11 @@ data:
               "legendFormat": "{{namespace}} / {{pod}} (Tx)",
               "refId": "Transmit"
             }
-          ]
+          ],
+          "title": "Network I/O by Pod",
+          "type": "timeseries"
         },
         {
-          "title": "Pod Restart Count",
-          "type": "timeseries",
-          "id": 3,
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "fieldConfig": {
             "defaults": {
@@ -51,19 +111,19 @@ data:
               "custom": { "drawStyle": "bars", "fillOpacity": 80 }
             }
           },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "id": 3,
           "targets": [
             {
               "expr": "sum(kube_pod_container_status_restarts_total{namespace!=\"\"}) by (pod, namespace)",
               "legendFormat": "{{namespace}} / {{pod}}",
               "refId": "A"
             }
-          ]
+          ],
+          "title": "Pod Restart Count",
+          "type": "timeseries"
         },
         {
-          "title": "Memory Usage by Pod",
-          "type": "timeseries",
-          "id": 2,
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "fieldConfig": {
             "defaults": {
@@ -71,19 +131,19 @@ data:
               "custom": { "drawStyle": "line", "fillOpacity": 10 }
             }
           },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "id": 2,
           "targets": [
             {
               "expr": "sum(container_memory_working_set_bytes{container!=\"\"}) by (pod, namespace)",
               "legendFormat": "{{namespace}} / {{pod}}",
               "refId": "A"
             }
-          ]
+          ],
+          "title": "Memory Usage by Pod",
+          "type": "timeseries"
         },
         {
-          "title": "CPU Usage by Pod",
-          "type": "timeseries",
-          "id": 1,
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "fieldConfig": {
             "defaults": {
@@ -91,44 +151,23 @@ data:
               "custom": { "drawStyle": "line", "fillOpacity": 10 }
             }
           },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "id": 1,
           "targets": [
             {
               "expr": "sum(rate(container_cpu_usage_seconds_total{container!=\"\"}[5m])) by (pod, namespace)",
               "legendFormat": "{{namespace}} / {{pod}}",
               "refId": "A"
             }
-          ]
-        },
-        {
-          "title": "PVC Utilization",
-          "type": "gauge",
-          "id": 5,
-          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "percent",
-              "min": 0,
-              "max": 100,
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  { "color": "green", "value": null },
-                  { "color": "orange", "value": 75 },
-                  { "color": "red", "value": 90 }
-                ]
-              }
-            }
-          },
-          "targets": [
-            {
-              "expr": "sum(kubelet_volume_stats_used_bytes) by (persistentvolumeclaim) / sum(kubelet_volume_stats_capacity_bytes) by (persistentvolumeclaim) * 100",
-              "legendFormat": "{{persistentvolumeclaim}}",
-              "refId": "A"
-            }
-          ]
+          ],
+          "title": "CPU Usage by Pod",
+          "type": "timeseries"
         }
       ],
+      "schemaVersion": 42,
       "time": { "from": "now-6h", "to": "now" },
-      "timezone": "browser"
+      "timezone": "browser",
+      "title": "Homelab Overview",
+      "uid": "adghlr6",
+      "version": 5
     }
