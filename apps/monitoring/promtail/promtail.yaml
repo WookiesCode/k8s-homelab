@@ -1,3 +1,37 @@
+# promtail.yaml
+---
+apiVersion: v1
+kind: ServiceAccount             # ADDED: required for k8s service discovery
+metadata:
+  name: promtail
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole               # ADDED: grants pod/namespace read access
+metadata:
+  name: promtail
+rules:
+  - apiGroups: [""]
+    resources:
+      - nodes
+      - services
+      - pods
+      - namespaces
+    verbs: ["get", "watch", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding        # ADDED: binds the role to our ServiceAccount
+metadata:
+  name: promtail
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: promtail
+subjects:
+  - kind: ServiceAccount
+    name: promtail
+    namespace: monitoring
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -8,10 +42,13 @@ data:
     server:
       http_listen_port: 9080
       grpc_listen_port: 0
+
     positions:
-      filename: /tmp/positions.yaml
+      filename: /run/promtail/positions.yaml   # FIXED: /tmp is not writable with readOnlyRootFS
+
     clients:
       - url: http://loki:3100/loki/api/v1/push
+
     scrape_configs:
       - job_name: kubernetes-pods
         kubernetes_sd_configs:
@@ -20,6 +57,15 @@ data:
           - action: replace
             source_labels: [__meta_kubernetes_pod_name]
             target_label: pod
+          - action: replace                    # ADDED: include namespace label
+            source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - action: replace                    # ADDED: include container label
+            source_labels: [__meta_kubernetes_pod_container_name]
+            target_label: container
+          - action: drop                       # ADDED: skip pods with no logs
+            regex: ''
+            source_labels: [__meta_kubernetes_pod_annotation_kubectl_kubernetes_io_last_applied_configuration]
         pipeline_stages:
           - cri: {}
 ---
@@ -37,11 +83,28 @@ spec:
       labels:
         app: promtail
     spec:
+      serviceAccountName: promtail    # ADDED: link to ServiceAccount
+      securityContext:
+        runAsUser: 0                  # NOTE: must run as root to read /var/log on most nodes
+                                      # Scope is limited by readOnlyRootFilesystem below
       containers:
         - name: promtail
-          image: grafana/promtail:latest
+          image: grafana/promtail:2.9.6   # FIXED: was "latest"; match Loki version
           args:
             - "-config.file=/etc/promtail/promtail.yaml"
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+          ports:
+            - containerPort: 9080       # ADDED: explicit port
+              name: http-metrics
+          resources:                    # ADDED: was missing
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
           volumeMounts:
             - name: logs
               mountPath: /var/log
@@ -50,6 +113,8 @@ spec:
               readOnly: true
             - name: config
               mountPath: /etc/promtail
+            - name: positions           # ADDED: writable dir for positions file
+              mountPath: /run/promtail
       volumes:
         - name: logs
           hostPath:
@@ -60,3 +125,5 @@ spec:
         - name: config
           configMap:
             name: promtail-config
+        - name: positions               # ADDED: emptyDir for positions file
+          emptyDir: {}

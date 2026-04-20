@@ -1,3 +1,5 @@
+# daemonset.yaml
+---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -14,15 +16,40 @@ spec:
     spec:
       hostNetwork: true
       hostPID: true
+      tolerations:                          # ADDED: ensures it runs on control-plane nodes
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master   # older k8s compat
+          operator: Exists
+          effect: NoSchedule
       containers:
         - name: node-exporter
-          image: prom/node-exporter:latest
+          image: prom/node-exporter:v1.8.0  # FIXED: was "latest"
           args:
             - "--path.rootfs=/host"
+          securityContext:                  # ADDED: was running as root with no constraints
+            runAsNonRoot: true
+            runAsUser: 65534                # nobody
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - containerPort: 9100           # ADDED: explicit port declaration
+              name: metrics
+          resources:                        # ADDED: was missing
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
           volumeMounts:
             - name: root
               mountPath: /host
               readOnly: true
+              mountPropagation: HostToContainer   # ADDED: needed for correct proc/sys visibility
       volumes:
         - name: root
           hostPath:

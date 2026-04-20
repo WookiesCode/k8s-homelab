@@ -1,3 +1,5 @@
+# prometheus.yaml
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -7,11 +9,38 @@ data:
   prometheus.yml: |
     global:
       scrape_interval: 15s
+      evaluation_interval: 15s
+
     scrape_configs:
       - job_name: 'prometheus'
         static_configs:
           - targets: ['localhost:9090']
-      # Add your application targets here
+
+      - job_name: 'node-exporter'        # ADDED: scrape the DaemonSet
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+          - target_label: __address__
+            replacement: __address__:9100
+
+      # Add application targets below:
+      # - job_name: 'my-app'
+      #   static_configs:
+      #     - targets: ['my-app-service:8080']
+---
+apiVersion: v1
+kind: PersistentVolumeClaim             # ADDED: was missing — metrics lost on restart
+metadata:
+  name: prometheus-storage
+  namespace: monitoring
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi                     # Size based on retention period + scrape targets
 ---
 apiVersion: v1
 kind: Service
@@ -40,16 +69,49 @@ spec:
       labels:
         app: prometheus
     spec:
+      securityContext:                  # ADDED
+        fsGroup: 65534
+        runAsUser: 65534
+        runAsNonRoot: true
       containers:
         - name: prometheus
-          image: prom/prometheus:latest
+          image: prom/prometheus:v2.52.0   # FIXED: was "latest"
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus"
+            - "--storage.tsdb.retention.time=15d"    # ADDED: explicit retention
+            - "--web.enable-lifecycle"               # ADDED: allows config hot-reload
           ports:
             - containerPort: 9090
+          resources:                    # ADDED: was missing
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 2Gi
+          readinessProbe:               # ADDED
+            httpGet:
+              path: /-/ready
+              port: 9090
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:                # ADDED
+            httpGet:
+              path: /-/healthy
+              port: 9090
+            initialDelaySeconds: 30
+            periodSeconds: 15
           volumeMounts:
             - name: config-volume
               mountPath: /etc/prometheus/prometheus.yml
               subPath: prometheus.yml
+            - name: prometheus-storage  # ADDED
+              mountPath: /prometheus
       volumes:
         - name: config-volume
           configMap:
             name: prometheus-config
+        - name: prometheus-storage      # ADDED
+          persistentVolumeClaim:
+            claimName: prometheus-storage

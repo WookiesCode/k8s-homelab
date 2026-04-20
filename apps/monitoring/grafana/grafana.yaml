@@ -1,16 +1,40 @@
+# grafana.yaml
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-admin-secret
+  namespace: monitoring
+type: Opaque
+stringData:
+  admin-user: admin          # CHANGE BEFORE APPLYING
+  admin-password: changeme   # CHANGE BEFORE APPLYING
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-storage
+  namespace: monitoring
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
 apiVersion: v1
 kind: Service
 metadata:
   name: grafana
   namespace: monitoring
 spec:
-  type: NodePort # Allows external access
+  type: NodePort
   selector:
     app: grafana
   ports:
     - port: 3000
       targetPort: 3000
-      nodePort: 32000 
+      nodePort: 32000
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -27,8 +51,55 @@ spec:
       labels:
         app: grafana
     spec:
+      securityContext:
+        fsGroup: 472
+        runAsNonRoot: true       # ADDED: enforce non-root at pod level
       containers:
         - name: grafana
-          image: grafana/grafana:latest
+          image: grafana/grafana:11.0.0   # pinned — good, keep it
+          securityContext:
+            runAsUser: 472
+            allowPrivilegeEscalation: false   # ADDED
+            readOnlyRootFilesystem: false     # Grafana writes to /tmp, leave false
           ports:
             - containerPort: 3000
+          env:                              # ADDED: credentials from Secret
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin-secret
+                  key: admin-user
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin-secret
+                  key: admin-password
+            - name: GF_PATHS_DATA
+              value: /var/lib/grafana
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:                    # ADDED
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:                   # ADDED
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 5
+          volumeMounts:
+            - name: grafana-storage
+              mountPath: /var/lib/grafana
+      volumes:
+        - name: grafana-storage
+          persistentVolumeClaim:
+            claimName: grafana-storage
