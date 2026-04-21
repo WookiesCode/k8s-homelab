@@ -121,12 +121,14 @@ spec:
               port: 3100
             initialDelaySeconds: 60
             periodSeconds: 10
+            failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /ready
               port: 3100
             initialDelaySeconds: 90
             periodSeconds: 15
+            failureThreshold: 3
           volumeMounts:
             - name: loki-config
               mountPath: /etc/loki
