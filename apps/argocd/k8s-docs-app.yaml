@@ -1,0 +1,18 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: k8s-docs
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/WookiesCode/k8s-homelab
+    targetRevision: HEAD
+    path: apps/k8s-docs
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: k8s-docs
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
