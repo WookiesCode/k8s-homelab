@@ -1,16 +1,6 @@
 # grafana.yaml
 ---
 apiVersion: v1
-kind: Secret
-metadata:
-  name: grafana-admin-secret
-  namespace: monitoring
-type: Opaque
-stringData:
-  admin-user: admin
-  admin-password: $R0b0t1cs?    # set this before applying
----
-apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: grafana-data                    # matches live cluster PVC name
