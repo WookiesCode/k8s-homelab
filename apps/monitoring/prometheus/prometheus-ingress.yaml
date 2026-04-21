@@ -3,8 +3,14 @@ kind: Ingress
 metadata:
   name: prometheus-ingress
   namespace: monitoring
+  annotations:
+    cert-manager.io/cluster-issuer: selfsigned
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - prometheus.lan
+      secretName: prometheus-tls
   rules:
     - host: prometheus.lan
       http:

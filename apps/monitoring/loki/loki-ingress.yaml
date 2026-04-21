@@ -3,8 +3,14 @@ kind: Ingress
 metadata:
   name: loki-ingress
   namespace: monitoring
+  annotations:
+    cert-manager.io/cluster-issuer: selfsigned
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - loki.lan
+      secretName: loki-tls
   rules:
     - host: loki.lan
       http:

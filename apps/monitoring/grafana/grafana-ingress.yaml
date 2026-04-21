@@ -4,13 +4,17 @@ metadata:
   name: grafana-ingress
   namespace: monitoring
   annotations:
-    # These annotations help keep the connection alive for Grafana's live dashboards
+    cert-manager.io/cluster-issuer: selfsigned
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - grafana.lan
+      secretName: grafana-tls
   rules:
-    - host: grafana.lan # Change this to the domain you want to use
+    - host: grafana.lan
       http:
         paths:
           - path: /
