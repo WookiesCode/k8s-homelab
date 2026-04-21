@@ -41,7 +41,7 @@ data:
 
     limits_config:
       reject_old_samples: true
-      reject_old_samples_max_age: 168h    # 7 days
+      reject_old_samples_max_age: 168h
 
     chunk_store_config:
       max_look_back_period: 168h
@@ -51,16 +51,16 @@ data:
       retention_period: 168h
 ---
 apiVersion: v1
-kind: PersistentVolumeClaim             # ADDED: was completely missing
+kind: PersistentVolumeClaim
 metadata:
-  name: loki-storage
+  name: loki-data                # matches live cluster PVC name
   namespace: monitoring
 spec:
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 10Gi                     # Adjust to expected log volume
+      storage: 20Gi
 ---
 apiVersion: v1
 kind: Service
@@ -90,30 +90,39 @@ spec:
         app: loki
     spec:
       securityContext:
-        fsGroup: 10001                  # Loki's default GID for volume access
+        fsGroup: 10001
         runAsUser: 10001
         runAsNonRoot: true
+      initContainers:
+        - name: fix-permissions
+          image: busybox:1.36
+          command: ["sh", "-c", "chown -R 10001:10001 /loki && mkdir -p /loki/rules && chown -R 10001:10001 /loki/rules"]
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: loki-data
+              mountPath: /loki
       containers:
         - name: loki
-          image: grafana/loki:2.9.6    # FIXED: was "latest"
+          image: grafana/loki:3.0.0      # matches live cluster
           ports:
             - containerPort: 3100
           args:
             - "-config.file=/etc/loki/local-config.yaml"
-          resources:                   # ADDED: was missing entirely
+          resources:
             requests:
               cpu: 100m
               memory: 256Mi
             limits:
               cpu: 500m
               memory: 512Mi
-          readinessProbe:              # ADDED
+          readinessProbe:
             httpGet:
               path: /ready
               port: 3100
             initialDelaySeconds: 30
             periodSeconds: 10
-          livenessProbe:               # ADDED
+          livenessProbe:
             httpGet:
               path: /ready
               port: 3100
@@ -122,12 +131,12 @@ spec:
           volumeMounts:
             - name: loki-config
               mountPath: /etc/loki
-            - name: loki-storage       # ADDED: persist index + chunks
+            - name: loki-data
               mountPath: /loki
       volumes:
         - name: loki-config
           configMap:
             name: loki-config
-        - name: loki-storage           # ADDED
+        - name: loki-data
           persistentVolumeClaim:
-            claimName: loki-storage
+            claimName: loki-data

@@ -1,13 +1,13 @@
 # promtail.yaml
 ---
 apiVersion: v1
-kind: ServiceAccount             # ADDED: required for k8s service discovery
+kind: ServiceAccount
 metadata:
   name: promtail
   namespace: monitoring
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole               # ADDED: grants pod/namespace read access
+kind: ClusterRole
 metadata:
   name: promtail
 rules:
@@ -20,7 +20,7 @@ rules:
     verbs: ["get", "watch", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding        # ADDED: binds the role to our ServiceAccount
+kind: ClusterRoleBinding
 metadata:
   name: promtail
 roleRef:
@@ -44,7 +44,7 @@ data:
       grpc_listen_port: 0
 
     positions:
-      filename: /run/promtail/positions.yaml   # FIXED: /tmp is not writable with readOnlyRootFS
+      filename: /run/promtail/positions.yaml
 
     clients:
       - url: http://loki:3100/loki/api/v1/push
@@ -53,21 +53,25 @@ data:
       - job_name: kubernetes-pods
         kubernetes_sd_configs:
           - role: pod
+        pipeline_stages:
+          - cri: {}
         relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_uid, __meta_kubernetes_pod_container_name]
+            target_label: __path__
+            separator: /
+            replacement: /var/log/pods/*$1*/$2/*.log
+          - action: replace
+            source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
           - action: replace
             source_labels: [__meta_kubernetes_pod_name]
             target_label: pod
-          - action: replace                    # ADDED: include namespace label
-            source_labels: [__meta_kubernetes_namespace]
-            target_label: namespace
-          - action: replace                    # ADDED: include container label
+          - action: replace
             source_labels: [__meta_kubernetes_pod_container_name]
             target_label: container
-          - action: drop                       # ADDED: skip pods with no logs
-            regex: ''
-            source_labels: [__meta_kubernetes_pod_annotation_kubectl_kubernetes_io_last_applied_configuration]
-        pipeline_stages:
-          - cri: {}
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -83,22 +87,21 @@ spec:
       labels:
         app: promtail
     spec:
-      serviceAccountName: promtail    # ADDED: link to ServiceAccount
+      serviceAccountName: promtail
       securityContext:
-        runAsUser: 0                  # NOTE: must run as root to read /var/log on most nodes
-                                      # Scope is limited by readOnlyRootFilesystem below
+        runAsUser: 0
       containers:
         - name: promtail
-          image: grafana/promtail:2.9.6   # FIXED: was "latest"; match Loki version
+          image: grafana/promtail:3.0.0   # matches live loki version
           args:
             - "-config.file=/etc/promtail/promtail.yaml"
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
           ports:
-            - containerPort: 9080       # ADDED: explicit port
+            - containerPort: 9080
               name: http-metrics
-          resources:                    # ADDED: was missing
+          resources:
             requests:
               cpu: 50m
               memory: 64Mi
@@ -109,11 +112,11 @@ spec:
             - name: logs
               mountPath: /var/log
             - name: containers
-              mountPath: /var/lib/docker/containers
+              mountPath: /var/log/pods   # FIXED: containerd path
               readOnly: true
             - name: config
               mountPath: /etc/promtail
-            - name: positions           # ADDED: writable dir for positions file
+            - name: positions
               mountPath: /run/promtail
       volumes:
         - name: logs
@@ -121,9 +124,9 @@ spec:
             path: /var/log
         - name: containers
           hostPath:
-            path: /var/lib/docker/containers
+            path: /var/log/pods         # FIXED: containerd path
         - name: config
           configMap:
             name: promtail-config
-        - name: positions               # ADDED: emptyDir for positions file
+        - name: positions
           emptyDir: {}

@@ -16,7 +16,7 @@ data:
         static_configs:
           - targets: ['localhost:9090']
 
-      - job_name: 'node-exporter'        # ADDED: scrape the DaemonSet
+      - job_name: 'node-exporter'
         kubernetes_sd_configs:
           - role: node
         relabel_configs:
@@ -31,16 +31,16 @@ data:
       #     - targets: ['my-app-service:8080']
 ---
 apiVersion: v1
-kind: PersistentVolumeClaim             # ADDED: was missing — metrics lost on restart
+kind: PersistentVolumeClaim
 metadata:
-  name: prometheus-storage
+  name: prometheus-data          # matches live cluster PVC name
   namespace: monitoring
 spec:
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 20Gi                     # Size based on retention period + scrape targets
+      storage: 20Gi
 ---
 apiVersion: v1
 kind: Service
@@ -69,34 +69,43 @@ spec:
       labels:
         app: prometheus
     spec:
-      securityContext:                  # ADDED
+      securityContext:
         fsGroup: 65534
         runAsUser: 65534
         runAsNonRoot: true
+      initContainers:
+        - name: fix-permissions
+          image: busybox:1.36
+          command: ["sh", "-c", "chown -R 65534:65534 /prometheus"]
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: data
+              mountPath: /prometheus
       containers:
         - name: prometheus
-          image: prom/prometheus:v2.52.0   # FIXED: was "latest"
+          image: prom/prometheus:v3.11.2   # matches live cluster
           args:
             - "--config.file=/etc/prometheus/prometheus.yml"
             - "--storage.tsdb.path=/prometheus"
-            - "--storage.tsdb.retention.time=15d"    # ADDED: explicit retention
-            - "--web.enable-lifecycle"               # ADDED: allows config hot-reload
+            - "--storage.tsdb.retention.time=15d"
+            - "--web.enable-lifecycle"
           ports:
             - containerPort: 9090
-          resources:                    # ADDED: was missing
+          resources:
             requests:
               cpu: 200m
               memory: 512Mi
             limits:
               cpu: 1000m
               memory: 2Gi
-          readinessProbe:               # ADDED
+          readinessProbe:
             httpGet:
               path: /-/ready
               port: 9090
             initialDelaySeconds: 30
             periodSeconds: 10
-          livenessProbe:                # ADDED
+          livenessProbe:
             httpGet:
               path: /-/healthy
               port: 9090
@@ -106,12 +115,12 @@ spec:
             - name: config-volume
               mountPath: /etc/prometheus/prometheus.yml
               subPath: prometheus.yml
-            - name: prometheus-storage  # ADDED
+            - name: data
               mountPath: /prometheus
       volumes:
         - name: config-volume
           configMap:
             name: prometheus-config
-        - name: prometheus-storage      # ADDED
+        - name: data
           persistentVolumeClaim:
-            claimName: prometheus-storage
+            claimName: prometheus-data

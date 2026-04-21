@@ -7,13 +7,13 @@ metadata:
   namespace: monitoring
 type: Opaque
 stringData:
-  admin-user: admin          # CHANGE BEFORE APPLYING
-  admin-password: changeme   # CHANGE BEFORE APPLYING
+  admin-user: admin
+  admin-password: $R0b0t1cs?    # set this before applying
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: grafana-storage
+  name: grafana-data                    # matches live cluster PVC name
   namespace: monitoring
 spec:
   accessModes:
@@ -53,17 +53,26 @@ spec:
     spec:
       securityContext:
         fsGroup: 472
-        runAsNonRoot: true       # ADDED: enforce non-root at pod level
+        runAsNonRoot: true
+      initContainers:
+        - name: fix-permissions
+          image: busybox:1.36
+          command: ["sh", "-c", "chown -R 472:472 /var/lib/grafana"]
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: grafana-data
+              mountPath: /var/lib/grafana
       containers:
         - name: grafana
-          image: grafana/grafana:11.0.0   # pinned — good, keep it
+          image: grafana/grafana:13.0.1  # matches live cluster
           securityContext:
             runAsUser: 472
-            allowPrivilegeEscalation: false   # ADDED
-            readOnlyRootFilesystem: false     # Grafana writes to /tmp, leave false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
           ports:
             - containerPort: 3000
-          env:                              # ADDED: credentials from Secret
+          env:
             - name: GF_SECURITY_ADMIN_USER
               valueFrom:
                 secretKeyRef:
@@ -83,23 +92,23 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
-          livenessProbe:                    # ADDED
+          livenessProbe:
             httpGet:
               path: /api/health
               port: 3000
             initialDelaySeconds: 30
             periodSeconds: 10
             failureThreshold: 3
-          readinessProbe:                   # ADDED
+          readinessProbe:
             httpGet:
               path: /api/health
               port: 3000
             initialDelaySeconds: 15
             periodSeconds: 5
           volumeMounts:
-            - name: grafana-storage
+            - name: grafana-data
               mountPath: /var/lib/grafana
       volumes:
-        - name: grafana-storage
+        - name: grafana-data
           persistentVolumeClaim:
-            claimName: grafana-storage
+            claimName: grafana-data
