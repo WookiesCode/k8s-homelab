@@ -25,7 +25,7 @@ spec:
           effect: NoSchedule
       containers:
         - name: node-exporter
-          image: prom/node-exporter:v1.8.0  # FIXED: was "latest"
+          image: prom/node-exporter:v1.8.1  # FIXED: was "latest"
           args:
             - "--path.rootfs=/host"
           securityContext:                  # ADDED: was running as root with no constraints
