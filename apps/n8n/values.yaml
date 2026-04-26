@@ -1,30 +1,33 @@
-n8n:
-  persistence:
-    enabled: true
-    storageClass: "longhorn"
-    size: 10Gi
-
-config:
-  database:
-    type: postgresdb
-    postgresdb:
-      host: "postgres-svc.monitoring.svc.cluster.local"
-      database: "n8n"
-      user: "n8n_user"
-      password:
-        secretName: n8n-secret
-        secretKey: db_password
-  encryptionKey:
-    secretName: n8n-secret
-    secretKey: encryption_key
-
-persistence: # Keeping this here too just in case the chart reads from root
+# Flat structure to satisfy the schema
+persistence:
   enabled: true
-  storageClass: "longhorn"
-  size: 10Gi
+  existingClaim: n8n-pvc
+
+# Inject database settings via extraEnv to ensure they take
+extraEnv:
+  - name: DB_TYPE
+    value: postgresdb
+  - name: DB_POSTGRESDB_HOST
+    value: "postgres-svc.monitoring.svc.cluster.local"
+  - name: DB_POSTGRESDB_DATABASE
+    value: "n8n"
+  - name: DB_POSTGRESDB_USER
+    value: "n8n_user"
+  - name: DB_POSTGRESDB_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: n8n-secret
+        key: db_password
+  - name: N8N_ENCRYPTION_KEY
+    valueFrom:
+      secretKeyRef:
+        name: n8n-secret
+        key: encryption_key
 
 ingress:
   enabled: true
+  annotations:
+    kubernetes.io/ingress.class: nginx
   hosts:
     - host: n8n.lan
       paths:
