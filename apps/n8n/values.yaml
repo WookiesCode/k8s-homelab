@@ -3,7 +3,7 @@ n8n:
     database:
       type: postgresdb
       postgresdb:
-        host: "postgres-svc.monitoring.svc.cluster.local"
+        host: "postgres-svc.monitoring.svc.cluster.local" 
         database: "n8n"
         user: "n8n_user"
         password:
@@ -24,7 +24,7 @@ n8n:
     annotations:
       kubernetes.io/ingress.class: nginx
     hosts:
-      - host: n8n.lan
+      - host: n8n.lan # Updated to match your LAN
         paths:
           - path: /
-            pathType: ImplementationSpecific # Adding this to fix the 'pathType' error
+            pathType: ImplementationSpecific
