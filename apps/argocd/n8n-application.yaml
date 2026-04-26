@@ -6,7 +6,8 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: '~/k8s-homelab' # Change this to your actual Git SSH/HTTPS URL
+    # Use the HTTPS or SSH URL that ArgoCD has access to
+    repoURL: 'https://github.com/WookiesCode/k8s-homelab.git'
     path: apps/n8n
     targetRevision: main
     helm:
