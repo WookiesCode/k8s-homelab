@@ -1,16 +1,30 @@
-# Minimal config to bypass schema errors
 n8n:
-  encryptionKey: "a-temporary-key-for-initial-sync"
+  persistence:
+    enabled: true
+    storageClass: "longhorn"
+    size: 10Gi
 
-persistence:
+config:
+  database:
+    type: postgresdb
+    postgresdb:
+      host: "postgres-svc.monitoring.svc.cluster.local"
+      database: "n8n"
+      user: "n8n_user"
+      password:
+        secretName: n8n-secret
+        secretKey: db_password
+  encryptionKey:
+    secretName: n8n-secret
+    secretKey: encryption_key
+
+persistence: # Keeping this here too just in case the chart reads from root
   enabled: true
   storageClass: "longhorn"
   size: 10Gi
 
 ingress:
   enabled: true
-  annotations:
-    kubernetes.io/ingress.class: nginx
   hosts:
     - host: n8n.lan
       paths:
