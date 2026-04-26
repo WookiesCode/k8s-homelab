@@ -7,6 +7,6 @@ ingress:
   ingressClassName: nginx
   host: longhorn.lan
   annotations:
-    cert-manager.io/cluster-issuer: selfsigned
+    cert-manager.io/cluster-issuer: homelab-ca
   tls: true
   tlsSecret: longhorn-tls

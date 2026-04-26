@@ -4,7 +4,7 @@ metadata:
   name: loki-ingress
   namespace: monitoring
   annotations:
-    cert-manager.io/cluster-issuer: selfsigned
+    cert-manager.io/cluster-issuer: homelab-ca
 spec:
   ingressClassName: nginx
   tls:

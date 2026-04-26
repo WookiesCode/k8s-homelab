@@ -144,7 +144,7 @@ metadata:
   name: nextcloud
   namespace: nextcloud
   annotations:
-    cert-manager.io/cluster-issuer: selfsigned
+    cert-manager.io/cluster-issuer: homelab-ca
     nginx.ingress.kubernetes.io/proxy-body-size: "0"
 spec:
   ingressClassName: nginx

@@ -22,7 +22,7 @@ ingress:
   enabled: true
   ingressClassName: nginx
   annotations:
-    cert-manager.io/cluster-issuer: selfsigned
+    cert-manager.io/cluster-issuer: homelab-ca
   hosts:
     - host: jaeger.lan
       paths:
