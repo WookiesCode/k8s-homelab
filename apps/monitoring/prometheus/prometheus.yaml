@@ -60,6 +60,28 @@ data:
         static_configs:
           - targets: ['longhorn-backend.longhorn-system.svc.cluster.local:9500']
 
+      # Ingress NGINX - auto-discovers controller pod
+      - job_name: 'ingress-nginx'
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - ingress-nginx
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+            regex: ingress-nginx
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
+            regex: controller
+            action: keep
+          - source_labels: [__address__]
+            regex: '(.*):.*'
+            replacement: '${1}:10254'
+            target_label: __address__
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -100,6 +122,7 @@ spec:
       labels:
         app: prometheus
     spec:
+      serviceAccountName: prometheus
       securityContext:
         fsGroup: 65534
       initContainers:
