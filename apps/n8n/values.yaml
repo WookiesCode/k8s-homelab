@@ -1,35 +1,25 @@
-# Flat structure to satisfy the schema
-persistence:
-  enabled: true
-  existingClaim: n8n-pvc
+n8n:
+  # The schema requires this to be a string, not an object
+  encryptionKey: "your-secret-encryption-key" 
 
-# Inject database settings via extraEnv to ensure they take
-extraEnv:
-  - name: DB_TYPE
-    value: postgresdb
-  - name: DB_POSTGRESDB_HOST
-    value: "postgres-svc.monitoring.svc.cluster.local"
-  - name: DB_POSTGRESDB_DATABASE
-    value: "n8n"
-  - name: DB_POSTGRESDB_USER
-    value: "n8n_user"
-  - name: DB_POSTGRESDB_PASSWORD
-    valueFrom:
-      secretKeyRef:
-        name: n8n-secret
-        key: db_password
-  - name: N8N_ENCRYPTION_KEY
-    valueFrom:
-      secretKeyRef:
-        name: n8n-secret
-        key: encryption_key
+  db:
+    type: postgresdb
+    # This version uses these specific nested keys
+    externalPostgresql:
+      host: "postgres-svc.monitoring.svc.cluster.local"
+      database: "n8n"
+      username: "n8n_user"
+      password: "your_password"
 
-ingress:
-  enabled: true
-  annotations:
-    kubernetes.io/ingress.class: nginx
-  hosts:
-    - host: n8n.lan
-      paths:
-        - path: /
-          pathType: ImplementationSpecific
+  main:
+    persistence:
+      enabled: true
+      existingClaim: "n8n-pvc"
+
+  ingress:
+    enabled: true
+    hosts:
+      - host: n8n.lan
+        paths:
+          - path: /
+            pathType: ImplementationSpecific
