@@ -1,6 +1,0 @@
-name: n8n-custom
-version: 1.0.0
-dependencies:
-  - name: n8n
-    version: "1.16.37" # Current version as of April 2026
-    repository: https://community-charts.github.io/helm-charts
