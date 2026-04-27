@@ -34,7 +34,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: n8n
-          image: n8nio/n8n:latest
+          image: n8nio/n8n:2.17.7
           ports:
             - containerPort: 5678
           env:
