@@ -1,29 +1,37 @@
 n8n:
-  # The schema is very picky: encryptionKey must be a simple string
-  encryptionKey: "your-secret-encryption-key"
+  encryptionKey: "your-secret-key" # Use a string here
 
-  # Correct mapping for version 1.16.37
-  db:
-    type: postgresdb
-    postgresdb:
-      host: "postgres-svc.monitoring.svc.cluster.local"
-      database: "n8n"
-      user: "n8n_user"
-      # Using the secret reference here
-      password:
-        secretName: n8n-secret
-        secretKey: db_password
-
-  # Persistence must be under the main component
   main:
     persistence:
       enabled: true
       existingClaim: "n8n-pvc"
+    
+    # Using extraEnv here forces these into the Pod's 'env' section
+    # This overrides anything coming from 'envFrom' (the ConfigMap)
+    extraEnv:
+      - name: DB_TYPE
+        value: "postgresdb"
+      - name: DB_POSTGRESDB_HOST
+        value: "postgres-svc.monitoring.svc.cluster.local"
+      - name: DB_POSTGRESDB_DATABASE
+        value: "n8n"
+      - name: DB_POSTGRESDB_PORT
+        value: "5432"
+      - name: DB_POSTGRESDB_USER
+        value: "n8n_user"
+      - name: DB_POSTGRESDB_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: n8n-secret
+            key: db_password
+      - name: N8N_ENCRYPTION_KEY
+        valueFrom:
+          secretKeyRef:
+            name: n8n-secret
+            key: encryption_key
 
 ingress:
   enabled: true
-  annotations:
-    kubernetes.io/ingress.class: nginx
   hosts:
     - host: n8n.lan
       paths:
