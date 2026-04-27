@@ -6,15 +6,11 @@ metadata:
 spec:
   project: default
   source:
-    # Use the HTTPS or SSH URL that ArgoCD has access to
-    repoURL: 'https://github.com/WookiesCode/k8s-homelab.git'
+    repoURL: https://github.com/WookiesCode/k8s-homelab
+    targetRevision: HEAD
     path: apps/n8n
-    targetRevision: main
-    helm:
-      valueFiles:
-        - values.yaml
   destination:
-    server: 'https://kubernetes.default.svc'
+    server: https://kubernetes.default.svc
     namespace: n8n
   syncPolicy:
     automated:
