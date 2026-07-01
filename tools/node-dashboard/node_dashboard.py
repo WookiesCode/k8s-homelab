@@ -12,6 +12,9 @@ menu letting you choose which section to view:
   6. PVC storage health
   7. Deployment/ReplicaSet health
   8. All of the above, in sequence
+
+Run with --hours/--top to override RECENT_RESTART_HOURS/TOP_N_PODS at
+the command line (see parse_args()).
 """
 
 # modules
