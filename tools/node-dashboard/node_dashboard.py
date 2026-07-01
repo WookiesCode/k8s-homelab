@@ -13,6 +13,10 @@ menu letting you choose which section to view:
   7. Deployment/ReplicaSet health
   8. All of the above, in sequence
 
+Any menu choice can also be run in "live mode", which clears the screen
+and re-runs that section every REFRESH_INTERVAL_SECONDS until you press
+Ctrl+C.
+
 Run with --hours/--top to override RECENT_RESTART_HOURS/TOP_N_PODS at
 the command line (see parse_args()).
 """
@@ -21,7 +25,8 @@ the command line (see parse_args()).
 import subprocess
 import json
 import argparse
-import os 
+import os
+import time
 from datetime import datetime, timezone
 from tabulate import tabulate
 
@@ -32,6 +37,7 @@ RESET = "\033[0m"
 
 RECENT_RESTART_HOURS = 1  # Number of hours to consider for recent restarts/events
 TOP_N_PODS = 10  # How many pods to show in the Top CPU / Top Memory usage tables
+REFRESH_INTERVAL_SECONDS = 30  # How often to refresh in live mode
 
 
 def run_kubectl(args):
@@ -411,14 +417,21 @@ def format_age(age):
         return f"{seconds}s ago"
 
 
+def clear_screen():
+    """
+    Clear the terminal screen (Linux/macOS - uses the `clear` command).
+    """
+    os.system("clear")
+
+
 # =============================================================
 # SHOW_* FUNCTIONS
 # Each of these fetches one resource type and prints its table.
 # They're the building blocks the menu dispatches to below -
 # each one is self-contained (fetches its own data, handles its
-# own None-check) so it can be called on its own or as part of
-# "All sections" without depending on anything else having run
-# first.
+# own None-check) so it can be called on its own, repeatedly in
+# live mode, or as part of "All sections" without depending on
+# anything else having run first.
 # =============================================================
 
 def show_nodes():
@@ -647,11 +660,41 @@ def show_deployments():
     else:
         print("All deployments are healthy.")
 
-def clear_screen():
+
+def show_all():
     """
-    Clear the terminal screen.
+    Run every show_*() function in sequence - the "All sections" view.
     """
-    os.system("clear")
+    show_nodes()
+    print()
+    show_pods()
+    print()
+    show_events()
+    print()
+    show_node_usage()
+    print()
+    show_top_pods()
+    print()
+    show_pvcs()
+    print()
+    show_deployments()
+
+
+# Maps each menu number to the function that handles it. Values here
+# are the functions THEMSELVES (no parentheses) - not the result of
+# calling them. That's what lets us look one up by the user's choice
+# and then call it (possibly more than once, in live mode) below.
+SECTION_FUNCTIONS = {
+    "1": show_nodes,
+    "2": show_pods,
+    "3": show_events,
+    "4": show_node_usage,
+    "5": show_top_pods,
+    "6": show_pvcs,
+    "7": show_deployments,
+    "8": show_all,
+}
+
 
 def show_menu():
     """
@@ -685,58 +728,60 @@ if __name__ == "__main__":
     TOP_N_PODS = args.top
 
     # Main menu loop. while True: runs forever until something inside
-    # it explicitly stops it - here, that's the "break" in the Exit
-    # branch below. Each pass: show the menu, read a choice, run the
-    # matching show_*() function(s), then loop back and show the menu
-    # again.
+    # it explicitly stops it - here, that's one of the "break" calls
+    # below. Each pass: clear the screen, show the menu, read a choice,
+    # then either exit, complain about bad input, or run the chosen
+    # section (once, or repeatedly in live mode).
     while True:
         clear_screen()
         choice = show_menu()
 
         if choice == "9":
-            print("Goodbye!")
-            break  # exits the while True loop, ending the program
-        
-        clear_screen()
-
-        if choice == "1":
-            show_nodes()
-        elif choice == "2":
-            show_pods()
-        elif choice == "3":
-            show_events()
-        elif choice == "4":
-            show_node_usage()
-        elif choice == "5":
-            show_top_pods()
-        elif choice == "6":
-            show_pvcs()
-        elif choice == "7":
-            show_deployments()
-        elif choice == "8":
-            # Run every section in sequence, same as the dashboard's
-            # original one-shot behavior before the menu was added.
-            show_nodes()
-            print()
-            show_pods()
-            print()
-            show_events()
-            print()
-            show_node_usage()
-            print()
-            show_top_pods()
-            print()
-            show_pvcs()
-            print()
-            show_deployments()
-        else:
-            # Anything typed that isn't 1-9 lands here instead of
-            # crashing - just ask again on the next loop iteration.
-            print("Invalid choice, please try again.")
-
-        print()  # blank line before the menu reappears
-        sub_choice = input("Press Enter to return to the menu, or type 'q' to quit: ")
-        if sub_choice.lower() == "q":
             clear_screen()
             print("Goodbye!")
-            break
+            break  # exits the while True loop, ending the program
+
+        if choice not in SECTION_FUNCTIONS:
+            # Anything typed that isn't 1-9 lands here instead of
+            # crashing - show a message, wait for a key, then loop
+            # back around (via `continue`) to redraw the menu.
+            clear_screen()
+            print("Invalid choice, please try again.")
+            input("Press Enter to continue: ")
+            continue
+
+        # Look up the actual function for this choice. section_function
+        # now holds e.g. show_nodes itself - calling it with () below
+        # is what actually runs it.
+        section_function = SECTION_FUNCTIONS[choice]
+
+        live_choice = input(
+            f"Run in live mode, refreshing every {REFRESH_INTERVAL_SECONDS}s? (y/N): "
+        )
+
+        if live_choice.lower() == "y":
+            # Live mode: keep clearing and re-running the chosen section
+            # until the user presses Ctrl+C. Ctrl+C normally kills a
+            # Python program outright by raising KeyboardInterrupt - the
+            # try/except here catches that specific interruption so it
+            # only breaks out of THIS loop, instead of ending the whole
+            # script.
+            try:
+                while True:
+                    clear_screen()
+                    section_function()
+                    print(f"\nRefreshing every {REFRESH_INTERVAL_SECONDS}s - press Ctrl+C to stop.")
+                    time.sleep(REFRESH_INTERVAL_SECONDS)
+            except KeyboardInterrupt:
+                print("\nStopped live mode.")
+                input("Press Enter to return to the menu: ")
+        else:
+            # Normal, single-view mode.
+            clear_screen()
+            section_function()
+            print()
+            sub_choice = input("Press Enter to return to the menu, or type 'q' to quit: ")
+            if sub_choice.lower() == "q":
+                clear_screen()
+                print("Goodbye!")
+                break
