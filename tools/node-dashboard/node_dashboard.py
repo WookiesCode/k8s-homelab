@@ -19,8 +19,11 @@ Any menu choice can also be run in "live mode", which clears the screen
 and re-runs that section every REFRESH_INTERVAL_SECONDS until you press
 Ctrl+C.
 
-Run with --hours/--top/--namespace to override RECENT_RESTART_HOURS,
-TOP_N_PODS, and NAMESPACE at the command line (see parse_args()).
+Settings (hours, top, namespace, refresh interval, Ollama host/model)
+can be set in config.json next to this script. Command-line flags
+(--hours/--top/--namespace) override config.json when given. Use
+--check to skip the menu and run a one-shot, cron-friendly health
+check instead (see parse_args()/load_config()/run_health_check()).
 """
 
 # modules
@@ -29,8 +32,8 @@ import json
 import argparse
 import os
 import time
-import ollama
 import sys
+import ollama
 from datetime import datetime, timezone
 from tabulate import tabulate
 
@@ -39,12 +42,30 @@ GREEN = "\033[92m"
 RED = "\033[91m"
 RESET = "\033[0m"
 
-RECENT_RESTART_HOURS = 1  # Number of hours to consider for recent restarts/events
-TOP_N_PODS = 10  # How many pods to show in the Top CPU / Top Memory usage tables
-REFRESH_INTERVAL_SECONDS = 30  # How often to refresh in live mode
-OLLAMA_HOST = "http://10.10.10.8:11434"
-OLLAMA_MODEL = "ornith:35b"
-NAMESPACE = None  # Set from --namespace at startup; None means all namespaces
+# Built-in fallback settings, used for anything missing from config.json
+# (or if config.json doesn't exist at all). This is the single source
+# of truth for default values - the module-level constants below are
+# initialized FROM this dict rather than repeating the values, so
+# there's only one place to update them.
+DEFAULT_CONFIG = {
+    "hours": 1,
+    "top": 10,
+    "namespace": None,
+    "refresh_interval_seconds": 30,
+    "ollama_host": "http://10.10.10.8:11434",
+    "ollama_model": "ornith:35b",
+}
+
+# These are reassigned in main() once config.json/command-line args
+# are read - the values here just give every function something valid
+# to use even if this module were ever imported without main() running
+# (e.g. from a test file).
+RECENT_RESTART_HOURS = DEFAULT_CONFIG["hours"]
+TOP_N_PODS = DEFAULT_CONFIG["top"]
+NAMESPACE = DEFAULT_CONFIG["namespace"]
+REFRESH_INTERVAL_SECONDS = DEFAULT_CONFIG["refresh_interval_seconds"]
+OLLAMA_HOST = DEFAULT_CONFIG["ollama_host"]
+OLLAMA_MODEL = DEFAULT_CONFIG["ollama_model"]
 
 
 def run_kubectl(args):
@@ -79,12 +100,40 @@ def run_kubectl(args):
         return None
 
 
-def parse_args():
+def load_config():
     """
-    Define and parse command-line arguments.
+    Load settings from config.json, sitting next to this script.
+    Falls back to DEFAULT_CONFIG for any key that's missing, and
+    to DEFAULT_CONFIG entirely if the file is missing or invalid JSON.
 
-    Returns an argparse.Namespace with .hours, .top, and .namespace
-    attributes.
+    Returns a dict with the same keys as DEFAULT_CONFIG.
+    """
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, "config.json")
+
+    config = dict(DEFAULT_CONFIG)  # start with a copy of the defaults
+
+    try:
+        with open(config_path) as f:
+            file_config = json.load(f)
+        config.update(file_config)
+    except FileNotFoundError:
+        print(f"No config.json found at {config_path}, using defaults.")
+    except json.JSONDecodeError:
+        print(f"Error: config.json at {config_path} is not valid JSON. Using defaults.")
+
+    return config
+
+
+def parse_args(config):
+    """
+    Define and parse command-line arguments. Defaults for --hours,
+    --top, and --namespace come from the loaded config dict, so
+    config.json sets the baseline and command-line flags override it
+    when given.
+
+    Returns an argparse.Namespace with .hours, .top, .namespace, and
+    .check attributes.
     """
     parser = argparse.ArgumentParser(
         description="Homelab Kubernetes cluster health dashboard."
@@ -92,19 +141,19 @@ def parse_args():
     parser.add_argument(
         "--hours",
         type=float,
-        default=1,
-        help="How many hours back to look for recent restarts/events (default: 1)"
+        default=config["hours"],
+        help=f"How many hours back to look for recent restarts/events (default: {config['hours']})"
     )
     parser.add_argument(
         "--top",
         type=int,
-        default=10,
-        help="How many pods to show in the Top CPU/Memory tables (default: 10)"
+        default=config["top"],
+        help=f"How many pods to show in the Top CPU/Memory tables (default: {config['top']})"
     )
     parser.add_argument(
         "--namespace",
         type=str,
-        default=None,
+        default=config["namespace"],
         help="Limit results to a single namespace (default: all namespaces)"
     )
     parser.add_argument(
@@ -848,6 +897,7 @@ def show_test_results():
     print(result.stdout)
     print(result.stderr)
 
+
 def run_health_check():
     """
     Run all core health checks once (Nodes, Pods, PVCs, Deployments)
@@ -913,6 +963,7 @@ def run_health_check():
 
     return not problems_found
 
+
 # Maps each menu number to the function that handles it. Values here
 # are the functions THEMSELVES (no parentheses) - not the result of
 # calling them. That's what lets us look one up by the user's choice
@@ -955,16 +1006,24 @@ Cluster Dashboard
 
 
 if __name__ == "__main__":
-    # Parse --hours/--top/--namespace once at startup. These get
-    # assigned to the same names used everywhere else in the file
-    # (RECENT_RESTART_HOURS, TOP_N_PODS, NAMESPACE), so every
-    # show_*() function automatically picks up the command-line
-    # values (or the defaults) without any further changes needed
-    # elsewhere.
-    args = parse_args()
+    # Load config.json (falling back to DEFAULT_CONFIG for anything
+    # missing), then parse command-line args using those as defaults -
+    # so config.json sets your baseline, and flags like --hours 6
+    # override it for a one-off run.
+    config = load_config()
+    args = parse_args(config)
+
+    # Reassign the module-level globals every other function reads.
+    # RECENT_RESTART_HOURS/TOP_N_PODS/NAMESPACE come from args (which
+    # already folded in config.json), while REFRESH_INTERVAL_SECONDS/
+    # OLLAMA_HOST/OLLAMA_MODEL aren't exposed as CLI flags, so they're
+    # read straight from config.
     RECENT_RESTART_HOURS = args.hours
     TOP_N_PODS = args.top
     NAMESPACE = args.namespace
+    REFRESH_INTERVAL_SECONDS = config["refresh_interval_seconds"]
+    OLLAMA_HOST = config["ollama_host"]
+    OLLAMA_MODEL = config["ollama_model"]
 
     if args.check:
         healthy = run_health_check()
