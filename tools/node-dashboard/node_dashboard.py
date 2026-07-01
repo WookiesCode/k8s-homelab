@@ -24,36 +24,44 @@ RESET = "\033[0m"
 RESTART_THRESHOLD = 5
 RECENT_RESTART_HOURS = 1  # Number of hours to consider for recent restarts/events
 
-
-def get_nodes():
+def run_kubectl(args):
     """
-    Fetch all cluster nodes via `kubectl get nodes -o json`.
+    Run a kubectl command and return the parsed JSON output.
 
+    args: a list of arguments to pass after "kubectl", e.g.
+        ["get", "nodes", "-o", "json"]
+    
     Returns the parsed JSON as a dict on success, or None if kubectl
-    isn't found, the command fails, or the output isn't valid JSON.
-    Callers must check for None before using the return value.
+    isn't found, the command fails, or the output ins't vaild JSON.
+    Callers must check for None before using the return values.
     """
     try:
         result = subprocess.run(
-            ["kubectl", "get", "nodes", "-o", "json"],
+            ["kubectl"] + args,
             capture_output=True,
             text=True,
             check=True
         )
     except FileNotFoundError:
-        print("Error: 'kubectl' command not found. Please ensure that kubectl is installed and in your PATH.")
+        print("Error: 'kubectl' command not found. Please ensure that kubectl is installed and in yyou PATH.")
         return None
     except subprocess.CalledProcessError as e:
         print(f"Error executing kubectl command: {e}")
         return None
-
+    
     try:
-        nodes_data = json.loads(result.stdout)
+        return json.loads(result.stdout)
     except json.JSONDecodeError:
         print("Error: could not parse kubectl output as JSON.")
         return None
 
-    return nodes_data
+def get_nodes():
+    """
+    Fetch all cluster nodes via `kubectl get nodes -o json`.
+
+    Returns the parsed JSON as a dict on success, or None on failure.
+    """
+    return run_kubectl(["get", "nodes", "-o", "json"])
 
 
 def get_node_status(node):
@@ -72,7 +80,6 @@ def get_node_status(node):
 
     return name, ready_status
 
-
 def get_pods():
     """
     Fetch all pods across all namespaces via `kubectl get pods -A -o json`.
@@ -80,28 +87,7 @@ def get_pods():
     Returns the parsed JSON as a dict on success, or None on failure
     (same failure modes/behavior as get_nodes()).
     """
-    try:
-        result = subprocess.run(
-            ["kubectl", "get", "pods", "-A", "-o", "json"],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-    except FileNotFoundError:
-        print("Error: 'kubectl' command not found. Please ensure that kubectl is installed and in your PATH.")
-        return None
-    except subprocess.CalledProcessError as e:
-        print(f"Error executing kubectl command: {e}")
-        return None
-
-    try:
-        pods_data = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        print("Error: could not parse kubectl output as JSON.")
-        return None
-
-    return pods_data
-
+    return run_kubectl(["get", "pods", "-A", "-o", "json"])
 
 def get_pod_status(pod):
     """
@@ -157,27 +143,8 @@ def get_events():
     Returns the parsed JSON as a dict on success, or None on failure
     (same failure modes/behavior as get_nodes()/get_pods()).
     """
-    try:
-        result = subprocess.run(
-            ["kubectl", "get", "events", "-A", "-o", "json"],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-    except FileNotFoundError:
-        print("Error: 'kubectl' command not found. Please ensure that kubectl is installed and in your PATH.")
-        return None
-    except subprocess.CalledProcessError as e:
-        print(f"Error executing kubectl command: {e}")
-        return None
+    return run_kubectl(["get", "events", "-A", "-o", "json"])
 
-    try:
-        events_data = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        print("Error: could not parse kubectl output as JSON.")
-        return None
-
-    return events_data
 
 
 def get_event_status(event):
