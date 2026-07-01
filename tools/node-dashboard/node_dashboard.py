@@ -21,6 +21,7 @@ the command line (see parse_args()).
 import subprocess
 import json
 import argparse
+import os 
 from datetime import datetime, timezone
 from tabulate import tabulate
 
@@ -646,6 +647,11 @@ def show_deployments():
     else:
         print("All deployments are healthy.")
 
+def clear_screen():
+    """
+    Clear the terminal screen.
+    """
+    os.system("clear")
 
 def show_menu():
     """
@@ -684,7 +690,14 @@ if __name__ == "__main__":
     # matching show_*() function(s), then loop back and show the menu
     # again.
     while True:
+        clear_screen()
         choice = show_menu()
+
+        if choice == "9":
+            print("Goodbye!")
+            break  # exits the while True loop, ending the program
+        
+        clear_screen()
 
         if choice == "1":
             show_nodes()
@@ -716,12 +729,14 @@ if __name__ == "__main__":
             show_pvcs()
             print()
             show_deployments()
-        elif choice == "9":
-            print("Goodbye!")
-            break  # exits the while True loop, ending the program
         else:
             # Anything typed that isn't 1-9 lands here instead of
             # crashing - just ask again on the next loop iteration.
             print("Invalid choice, please try again.")
 
         print()  # blank line before the menu reappears
+        sub_choice = input("Press Enter to return to the menu, or type 'q' to quit: ")
+        if sub_choice.lower() == "q":
+            clear_screen()
+            print("Goodbye!")
+            break
