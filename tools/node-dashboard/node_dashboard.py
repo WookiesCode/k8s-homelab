@@ -27,6 +27,7 @@ import json
 import argparse
 import os
 import time
+import ollama
 from datetime import datetime, timezone
 from tabulate import tabulate
 
@@ -38,6 +39,8 @@ RESET = "\033[0m"
 RECENT_RESTART_HOURS = 1  # Number of hours to consider for recent restarts/events
 TOP_N_PODS = 10  # How many pods to show in the Top CPU / Top Memory usage tables
 REFRESH_INTERVAL_SECONDS = 30  # How often to refresh in live mode
+OLLAMA_HOST = "http://10.10.10.8:11434"
+OLLAMA_MODEL = "ornith:35b"
 
 
 def run_kubectl(args):
@@ -679,6 +682,114 @@ def show_all():
     print()
     show_deployments()
 
+def gather_cluster_summary_text():
+    """
+    Gather cluster state into a single plain-text report, suitable for
+    feeding to an LLM as context. Covers the same data as the show_*()
+    functions, but as text instead of printed tables.
+    """
+    lines = []
+
+    # --- Nodes ---
+    data = get_nodes()
+    if data is not None:
+        nodes = data["items"]
+        lines.append("NODES:")
+        for node in nodes:
+            name, ready_status = get_node_status(node)
+            lines.append(f"- {name}: Ready={ready_status}")
+
+    # --- Pods ---
+    events_data = get_events()
+    events = events_data["items"] if events_data is not None else []
+    event_reason_lookup = build_event_reason_lookup(events)
+
+    pods_data = get_pods()
+    if pods_data is not None:
+        pods = pods_data["items"]
+        running_count = 0
+        problem_pod_lines = []
+
+        for pod in pods:
+            pod_name, phase, restart_count, recent_restart, last_restart_age = get_pod_status(pod)
+            last_event_reason = event_reason_lookup.get(pod_name, {}).get("reason", "-")
+            has_recent_event = last_event_reason != "-"
+
+            if phase == "Running" and not has_recent_event:
+                running_count += 1
+            else:
+                problem_pod_lines.append(f"- {pod_name}: phase={phase}, last_event={last_event_reason}")
+
+        lines.append(f"\nPODS: {running_count} healthy, {len(problem_pod_lines)} with issues")
+        lines.extend(problem_pod_lines)
+
+    # --- PVCs ---
+    pvc_data = get_pvcs()
+    if pvc_data is not None:
+        pvcs = pvc_data["items"]
+        bound_count = 0
+        problem_pvc_lines = []
+
+        for pvc in pvcs:
+            pvc_name, phase, storage_class, requested_storage = get_pvc_status(pvc)
+            if phase == "Bound":
+                bound_count += 1
+            else:
+                problem_pvc_lines.append(f"- {pvc_name}: phase={phase}")
+
+        lines.append(f"\nPVCS: {bound_count} bound, {len(problem_pvc_lines)} not bound")
+        lines.extend(problem_pvc_lines)
+
+    # --- Deployments ---
+    deployments_data = get_deployments()
+    if deployments_data is not None:
+        deployments = deployments_data["items"]
+        healthy_count = 0
+        problem_deploy_lines = []
+
+        for deployment in deployments:
+            deploy_name, desired_replicas, ready_replicas = get_deployment_status(deployment)
+            if desired_replicas == 0 or ready_replicas >= desired_replicas:
+                healthy_count += 1
+            else:
+                problem_deploy_lines.append(f"- {deploy_name}: {ready_replicas}/{desired_replicas} ready")
+
+        lines.append(f"\nDEPLOYMENTS: {healthy_count} healthy, {len(problem_deploy_lines)} degraded")
+        lines.extend(problem_deploy_lines)
+
+    return "\n".join(lines)
+
+def show_ai_summary():
+    """
+    Gather cluster state as text, send it to a local Ollama model, and
+    print a plain-English summary of the response.
+    """
+    summary_text = gather_cluster_summary_text()
+
+    prompt = (
+        "You are summarizing the health of a homelab Kubernetes cluster "
+        "for a quick status check. Here is the raw data:\n\n"
+        f"{summary_text}\n\n"
+        "Give a short, plain-English summary. Call out anything that "
+        "needs attention first, then briefly confirm what's healthy."
+    )
+
+    print("Asking Ollama for a summary, this may take a moment...\n")
+
+    client = ollama.Client(host=OLLAMA_HOST)
+
+    try:
+        response = client.chat(
+            model=OLLAMA_MODEL,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        print(response["message"]["content"])
+    except ConnectionError:
+        print(f"Error: could not connect to Ollama at {OLLAMA_HOST}. Is it running and reachable?")
+    except Exception as e:
+        print(f"Error getting summary from Ollama: {e}")
 
 # Maps each menu number to the function that handles it. Values here
 # are the functions THEMSELVES (no parentheses) - not the result of
@@ -693,6 +804,7 @@ SECTION_FUNCTIONS = {
     "6": show_pvcs,
     "7": show_deployments,
     "8": show_all,
+    "9": show_ai_summary,
 }
 
 
@@ -712,7 +824,8 @@ Cluster Dashboard
 6. PVCs
 7. Deployments
 8. All sections
-9. Exit
+9. AI Summary (Ollama)
+10. Exit
 """)
     return input("Choose an option: ")
 
@@ -736,15 +849,16 @@ if __name__ == "__main__":
         clear_screen()
         choice = show_menu()
 
-        if choice == "9":
+        if choice == "10":
             clear_screen()
             print("Goodbye!")
             break  # exits the while True loop, ending the program
 
         if choice not in SECTION_FUNCTIONS:
-            # Anything typed that isn't 1-9 lands here instead of
-            # crashing - show a message, wait for a key, then loop
-            # back around (via `continue`) to redraw the menu.
+            # Anything not in SECTION_FUNCTIONS (or "10" for Exit)
+            # lands here instead of crashing - show a message, wait
+            # for a key, then loop back around (via `continue`) to
+            # redraw the menu.
             clear_screen()
             print("Invalid choice, please try again.")
             input("Press Enter to continue: ")
