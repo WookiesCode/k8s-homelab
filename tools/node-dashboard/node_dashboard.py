@@ -201,6 +201,54 @@ def build_event_reason_lookup(events):
 
     return lookup
 
+def run_kubectl_text(args):
+    """
+    Run a kubectl command and return its raw stdout as plain text
+    (for commands like `kubectl top` that don't support -o json).
+
+    args: a list of arguments to pass after "kubectl", e.g.
+        ["top", "nodes"]
+
+    Returns the raw stdout string on success, or None on failure.
+    """
+    try:
+        result = subprocess.run(
+            ["kubectl"] + args,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+    except FileNotFoundError:
+        print("Error: 'kubectl' command not found. Please ensure that kubectl is installed and in your PATH.")
+        return None
+    except subprocess.CalledProcessError as e:
+        print(f"Error executing kubectl command: {e}")
+        return None
+    
+    return result.stdout
+
+def get_node_usage():
+    """
+    Fetch and parse `kubectl top nodes` output.
+
+    Returns a list of rows, eaach row a list:
+        [node_name, cpu_cores, cpu_percent, memory_bytes, memory_percent]
+    Returns an empty list if the command files or produce no data.
+    """
+    output = run_kubectl_text(["top","nodes"])
+    if output is None:
+        return []
+    
+    lines = output.strip().split("\n")
+    data_lines = lines[1:] #skip header row
+
+    rows = []
+    for line in data_lines:
+        columns = line.split()
+        rows.append(columns)
+    
+    return rows
+
 
 def format_age(age):
     """
@@ -316,3 +364,13 @@ if __name__ == "__main__":
         print(tabulate(event_rows, headers=["POD", "REASON", "COUNT", "LAST SEEN"], tablefmt="grid"))
     else:
         print("No recent warning events.")
+
+    print()  # blank line between sections
+
+    # --- Node Resource Usage ---
+    usage_rows = get_node_usage()
+    if usage_rows:
+        print("Node Resource Usage:")
+        print(tabulate(usage_rows, headers=["NODE", "CPU", "CPU%", "MEMORY", "MEM%"], tablefmt="grid"))
+    else:
+        print("Node usage data unavailable (metrics-server may be down).")
