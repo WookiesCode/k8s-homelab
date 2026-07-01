@@ -6,3 +6,7 @@ secrets/
 venv/
 __pycache__/
 *.pyc
+# Old/unused scripts
+checkhealth.py
+cluster_menu.py
+cluster_menu_health.py
