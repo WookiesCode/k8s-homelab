@@ -2,14 +2,16 @@
 """
 node_dashboard.py
 
-A homelab Kubernetes cluster health dashboard. Fetches Nodes, Pods,
-Events, and resource usage via kubectl, and prints a series of tables:
+A homelab Kubernetes cluster health dashboard. Presents an interactive
+menu letting you choose which section to view:
   1. Node readiness
   2. Unhealthy pods (with restart info and the most recent related event)
   3. Recent Warning events (last RECENT_RESTART_HOURS hours)
   4. Node CPU/memory usage
-  5. Top pods by CPU usage
-  6. Top pods by memory usage
+  5. Top pods by CPU/memory usage
+  6. PVC storage health
+  7. Deployment/ReplicaSet health
+  8. All of the above, in sequence
 """
 
 # modules
@@ -24,7 +26,6 @@ GREEN = "\033[92m"
 RED = "\033[91m"
 RESET = "\033[0m"
 
-# Restart Threshold for considering a pod unhealthy
 RECENT_RESTART_HOURS = 1  # Number of hours to consider for recent restarts/events
 TOP_N_PODS = 10  # How many pods to show in the Top CPU / Top Memory usage tables
 
@@ -60,6 +61,7 @@ def run_kubectl(args):
         print("Error: could not parse kubectl output as JSON.")
         return None
 
+
 def parse_args():
     """
     Define and parse command-line arguments.
@@ -68,20 +70,21 @@ def parse_args():
     """
     parser = argparse.ArgumentParser(
         description="Homelab Kubernetes cluster health dashboard."
-    ) 
+    )
     parser.add_argument(
         "--hours",
         type=float,
         default=1,
-        help="How many hours back to look for recent restarts/events (default: 1)" 
+        help="How many hours back to look for recent restarts/events (default: 1)"
     )
     parser.add_argument(
         "--top",
         type=int,
         default=10,
-        help="How man pods to show in the Top CPU/Memory tables (default: 10)"
+        help="How many pods to show in the Top CPU/Memory tables (default: 10)"
     )
     return parser.parse_args()
+
 
 def get_nodes():
     """
@@ -305,21 +308,23 @@ def get_pod_usage():
 
     return rows
 
+
 def get_pvcs():
     """
-    Fetch all PersistentVolumeClaims across all namepaces via
+    Fetch all PersistentVolumeClaims across all namespaces via
     `kubectl get pvc -A -o json`.
 
     Returns the parsed JSON as a dict on success, or None on failure.
     """
     return run_kubectl(["get", "pvc", "-A", "-o", "json"])
 
+
 def get_pvc_status(pvc):
     """
     Given a single PVC dict (one item from get_pvcs()'s "items" list),
     return (namespace/name, phase, storage_class, requested_storage).
 
-    phase is typically "Bound" (healthy), "Pending" (note yet bound),
+    phase is typically "Bound" (healthy), "Pending" (not yet bound),
     or "Lost" (backing volume is gone).
     """
     name = pvc["metadata"]["name"]
@@ -330,6 +335,7 @@ def get_pvc_status(pvc):
 
     return f"{namespace}/{name}", phase, storage_class, requested_storage
 
+
 def get_deployments():
     """
     Fetch all Deployments across all namespaces via
@@ -338,6 +344,7 @@ def get_deployments():
     Returns the parsed JSON as a dict on success, or None on failure.
     """
     return run_kubectl(["get", "deployments", "-A", "-o", "json"])
+
 
 def get_deployment_status(deployment):
     """
@@ -352,7 +359,8 @@ def get_deployment_status(deployment):
     desired_replicas = deployment["spec"].get("replicas", 0)
     ready_replicas = deployment["status"].get("readyReplicas", 0)
 
-    return f"{namespace}/{name}", desired_replicas, ready_replicas    
+    return f"{namespace}/{name}", desired_replicas, ready_replicas
+
 
 def parse_cpu_millicores(cpu_str):
     """
@@ -398,6 +406,17 @@ def format_age(age):
     else:
         return f"{seconds}s ago"
 
+
+# =============================================================
+# SHOW_* FUNCTIONS
+# Each of these fetches one resource type and prints its table.
+# They're the building blocks the menu dispatches to below -
+# each one is self-contained (fetches its own data, handles its
+# own None-check) so it can be called on its own or as part of
+# "All sections" without depending on anything else having run
+# first.
+# =============================================================
+
 def show_nodes():
     """
     Fetch and print the Nodes table.
@@ -411,8 +430,9 @@ def show_nodes():
     for node in nodes:
         name, ready_status = get_node_status(node)
         node_rows.append([name, ready_status])
-    
+
     print(tabulate(node_rows, headers=["NODE", "STATUS"], tablefmt="grid"))
+
 
 def show_pods():
     """
@@ -420,6 +440,8 @@ def show_pods():
 
     Internally also fetches Events, since pod health is determined by
     cross-referencing recent Warning events (see build_event_reason_lookup()).
+    This means choosing "Pods" from the menu is enough on its own - no
+    need to view Events first.
     """
     events_data = get_events()
     if events_data is None:
@@ -440,12 +462,16 @@ def show_pods():
 
     for pod in pods:
         pod_name, phase, restart_count, recent_restart, last_restart_age = get_pod_status(pod)
+
+        # Look up this pod's most recent Warning event, if any.
         last_event_reason = event_reason_lookup.get(pod_name, {}).get("reason", "-")
         has_recent_event = last_event_reason != "-"
 
         if phase == "Running" and not has_recent_event:
+            # Fully healthy - nothing to show, just count it.
             running_count += 1
         elif phase == "Running":
+            # Running, but flagged because of a recent event.
             running_count += 1
             if last_restart_age is not None:
                 last_restart_text = format_age(last_restart_age)
@@ -456,8 +482,10 @@ def show_pods():
             pending_count += 1
             pod_rows.append([pod_name, phase, "-", "-", last_event_reason])
         elif phase == "Succeeded":
+            # One-shot Jobs/CronJobs finishing normally - not a problem.
             succeeded_count += 1
         else:
+            # Anything else (e.g. Failed) - flag it.
             other_count += 1
             pod_rows.append([pod_name, phase, "-", "-", last_event_reason])
 
@@ -472,9 +500,14 @@ def show_pods():
         ))
     else:
         print("All pods are healthy.")
+
+
 def show_events():
     """
     Fetch and print Recent Warning Events from the last RECENT_RESTART_HOURS.
+
+    Independent of show_pods() above - this lists every Warning event
+    (not just ones tied to a currently-Running pod).
     """
     events_data = get_events()
     if events_data is None:
@@ -487,9 +520,9 @@ def show_events():
         event_type, reason, count, last_timestamp_str, pod_name, namespace = get_event_status(event)
 
         if event_type != "Warning":
-            continue
+            continue  # skip Normal events entirely
         if last_timestamp_str is None:
-            continue
+            continue  # no timestamp to compare against, skip
 
         last_timestamp = datetime.fromisoformat(last_timestamp_str.replace("Z", "+00:00"))
         now = datetime.now(timezone.utc)
@@ -504,9 +537,10 @@ def show_events():
     else:
         print("No recent warning events.")
 
+
 def show_node_usage():
     """
-    Fetch and print Node CPU/memory usage.
+    Fetch and print Node CPU/memory usage. Requires metrics-server.
     """
     usage_rows = get_node_usage()
     if usage_rows:
@@ -515,13 +549,20 @@ def show_node_usage():
     else:
         print("Node usage data unavailable (metrics-server may be down).")
 
+
 def show_top_pods():
     """
     Fetch pod resource usage and print Top N by CPU and by Memory.
+
+    CPU/memory values come back as strings with units baked in (e.g.
+    "168m", "2745Mi"), so we convert them to plain integers via
+    parse_cpu_millicores()/parse_memory_mi() just for sorting - the
+    original formatted string is still what gets displayed.
     """
     pod_usage_rows = get_pod_usage()
 
     if pod_usage_rows:
+        # row[2] is the CPU column: [namespace, pod_name, cpu, memory]
         cpu_sorted = sorted(pod_usage_rows, key=lambda row: parse_cpu_millicores(row[2]), reverse=True)
         top_cpu = cpu_sorted[:TOP_N_PODS]
 
@@ -530,6 +571,7 @@ def show_top_pods():
 
         print()
 
+        # row[3] is the memory column
         mem_sorted = sorted(pod_usage_rows, key=lambda row: parse_memory_mi(row[3]), reverse=True)
         top_mem = mem_sorted[:TOP_N_PODS]
 
@@ -538,9 +580,11 @@ def show_top_pods():
     else:
         print("Pod usage data unavailable (metrics-server may be down).")
 
+
 def show_pvcs():
     """
-    Fetch and print any PVCs that aren't Bound.
+    Fetch and print any PVCs that aren't Bound. A Bound PVC is healthy
+    and has nothing to report, so it's skipped, same approach as Pods.
     """
     pvc_data = get_pvcs()
     if pvc_data is None:
@@ -567,9 +611,12 @@ def show_pvcs():
     else:
         print("All PVCs are bound")
 
+
 def show_deployments():
     """
-    Fetch and print any Deployments with fewer ready replicas than desired.
+    Fetch and print any Deployments with fewer ready replicas than
+    desired. A deployment intentionally scaled to 0 (desired_replicas
+    == 0) is not a problem.
     """
     deployments_data = get_deployments()
     if deployments_data is None:
@@ -596,68 +643,82 @@ def show_deployments():
     else:
         print("All deployments are healthy.")
 
+
+def show_menu():
+    """
+    Print the menu options and return the user's choice as a string
+    (whatever input() reads - not converted to int, since the dispatch
+    logic below just compares it against string literals like "1").
+    """
+    print("""
+Cluster Dashboard
+1. Nodes
+2. Pods
+3. Recent Warning Events
+4. Node Resource Usage
+5. Top Pods by CPU/Memory
+6. PVCs
+7. Deployments
+8. All sections
+9. Exit
+""")
+    return input("Choose an option: ")
+
+
 if __name__ == "__main__":
+    # Parse --hours/--top once at startup. These get assigned to the
+    # same names used everywhere else in the file (RECENT_RESTART_HOURS,
+    # TOP_N_PODS), so every show_*() function automatically picks up
+    # the command-line values (or the defaults) without any further
+    # changes needed elsewhere.
     args = parse_args()
     RECENT_RESTART_HOURS = args.hours
     TOP_N_PODS = args.top
 
-    # =========================================================
-    # NODES
-    # Fetch every node and print a simple Ready/Not Ready table.
-    # =========================================================
-    show_nodes()
+    # Main menu loop. while True: runs forever until something inside
+    # it explicitly stops it - here, that's the "break" in the Exit
+    # branch below. Each pass: show the menu, read a choice, run the
+    # matching show_*() function(s), then loop back and show the menu
+    # again.
+    while True:
+        choice = show_menu()
 
-    print()  # blank line between sections
+        if choice == "1":
+            show_nodes()
+        elif choice == "2":
+            show_pods()
+        elif choice == "3":
+            show_events()
+        elif choice == "4":
+            show_node_usage()
+        elif choice == "5":
+            show_top_pods()
+        elif choice == "6":
+            show_pvcs()
+        elif choice == "7":
+            show_deployments()
+        elif choice == "8":
+            # Run every section in sequence, same as the dashboard's
+            # original one-shot behavior before the menu was added.
+            show_nodes()
+            print()
+            show_pods()
+            print()
+            show_events()
+            print()
+            show_node_usage()
+            print()
+            show_top_pods()
+            print()
+            show_pvcs()
+            print()
+            show_deployments()
+        elif choice == "9":
+            print("Goodbye!")
+            break  # exits the while True loop, ending the program
+        else:
+            # Anything typed that isn't 1-9 lands here instead of
+            # crashing - just ask again on the next loop iteration.
+            print("Invalid choice, please try again.")
 
-    # =========================================================
-    # PODS
-    # =========================================================
-    show_pods()
-
-    print()
-    # =========================================================
-    # RECENT WARNING EVENTS
-    # =========================================================
-    show_events()
-
-    print()  # blank line between sections
-
-    show_node_usage()
-
-    print()  # blank line between sections
-
-    # =========================================================
-    # TOP PODS BY CPU / MEMORY
-    # With ~78 pods, showing all of them would be noise, so we
-    # sort by usage (highest first) and only show the top N.
-    # CPU/memory values come back as strings with units baked in
-    # (e.g. "168m", "2745Mi"), so we convert them to plain integers
-    # via parse_cpu_millicores()/parse_memory_mi() just for sorting -
-    # the original formatted string is still what gets displayed.
-    # =========================================================
-
-    show_top_pods()
-    
-    print() # blank line between spaces
-
-    # =========================================================
-    # PERSISTENT VOLUME CLAIMS
-    # Only shows PVCs that aren't Bound - a Bound PVC is healthy
-    # and has nothing to report, so we skip it, same approach as
-    # the Pods table.
-    # =========================================================   
-
-    show_pvcs()
-
-    print()  # blank line between sections
-
-    # =========================================================
-    # DEPLOYMENTS
-    # Only flags deployments where desired replicas > 0 but
-    # fewer are actually ready - a deployment intentionally
-    # scaled to 0 (desired_replicas == 0) is not a problem.
-    # =========================================================
-
-    show_deployments()
-
-    print()
+        print()  # blank line before the menu reappears
