@@ -249,6 +249,52 @@ def get_node_usage():
     
     return rows
 
+def get_pod_usage():
+    """
+    Fetch and parse `kubectl top pods -A` output.
+
+    Returns a list of rows, each row a list:
+        [namespace, pod_name, cpu_cores, memory_bytes]
+    
+    Returns an empty list if the command fails or produces no data.
+    """
+    output = run_kubectl_text(["top", "pods", "-A"])
+    if output is None:
+        return []
+
+    lines = output.strip().split("\n")
+    data_lines = lines[1:] # skip header row
+
+    rows = []
+    for line in data_lines:
+        columns = line.split()
+        rows.append(columns)
+
+    return rows
+
+def parse_cpu_millicores(cpu_str):
+    """
+    Convert a kubectl CPU string like "168m" or "1" into an integer
+    number of millicores (1 core = 1000 millicores).
+    """
+    if cpu_str.endswith("m"):
+        return int(cpu_str[:-1])
+    else:
+        return int(cpu_str) * 1000
+
+def parse_memory_mi(mem_str):
+    """
+    Convert a kubectl memory string like "2745Mi", "512Ki", or "2Gi"
+    into an integer number of Mi (mebibytes), for consistent sorting.
+    """
+    if mem_str.endswith("Gi"):
+        return int(mem_str[:-2]) * 1024
+    elif mem_str.endswith("Mi"):
+        return int(mem_str[:-2])
+    elif mem_str.endswith("Ki"):
+        return int(mem_str[:-2]) // 1024
+    else:
+        return 0
 
 def format_age(age):
     """
@@ -374,3 +420,25 @@ if __name__ == "__main__":
         print(tabulate(usage_rows, headers=["NODE", "CPU", "CPU%", "MEMORY", "MEM%"], tablefmt="grid"))
     else:
         print("Node usage data unavailable (metrics-server may be down).")
+
+    print() # blank line between sections
+
+    # --- Top Pods by CPU/Memory Usage ---
+    pod_usage_rows = get_pod_usage()
+
+    if pod_usage_rows:
+        cpu_sorted = sorted(pod_usage_rows, key=lambda row: parse_cpu_millicores(row[2]), reverse=True)
+        top_cpu = cpu_sorted[:10]
+
+        print("Top 10 Pods by CPU:")
+        print(tabulate(top_cpu, headers=["NAMESPACE", "POD", "CPU", "MEMORY"], tablefmt="grid"))
+
+        print()
+
+        mem_sorted = sorted(pod_usage_rows, key=lambda row: parse_memory_mi(row[3]), reverse=True)
+        top_mem = mem_sorted[:10]
+
+        print("Top 10 Pods by Memory:")
+        print(tabulate(top_mem, headers=["NAMESPACE", "POD", "CPU", "MEMORY"], tablefmt="grid"))
+    else:
+        print("Pod usage data unavailable (metrics-server may be down).")
