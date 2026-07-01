@@ -2,11 +2,14 @@
 """
 node_dashboard.py
 
-A homelab Kubernetes cluster health dashboard. Fetches Nodes, Pods, and
-Events via kubectl, and prints three tables:
+A homelab Kubernetes cluster health dashboard. Fetches Nodes, Pods,
+Events, and resource usage via kubectl, and prints a series of tables:
   1. Node readiness
   2. Unhealthy pods (with restart info and the most recent related event)
   3. Recent Warning events (last RECENT_RESTART_HOURS hours)
+  4. Node CPU/memory usage
+  5. Top pods by CPU usage
+  6. Top pods by memory usage
 """
 
 # modules
@@ -23,6 +26,8 @@ RESET = "\033[0m"
 # Restart Threshold for considering a pod unhealthy
 RESTART_THRESHOLD = 5
 RECENT_RESTART_HOURS = 1  # Number of hours to consider for recent restarts/events
+TOP_N_PODS = 10  # How many pods to show in the Top CPU / Top Memory usage tables
+
 
 def run_kubectl(args):
     """
@@ -30,10 +35,10 @@ def run_kubectl(args):
 
     args: a list of arguments to pass after "kubectl", e.g.
         ["get", "nodes", "-o", "json"]
-    
+
     Returns the parsed JSON as a dict on success, or None if kubectl
-    isn't found, the command fails, or the output ins't vaild JSON.
-    Callers must check for None before using the return values.
+    isn't found, the command fails, or the output isn't valid JSON.
+    Callers must check for None before using the return value.
     """
     try:
         result = subprocess.run(
@@ -43,17 +48,18 @@ def run_kubectl(args):
             check=True
         )
     except FileNotFoundError:
-        print("Error: 'kubectl' command not found. Please ensure that kubectl is installed and in yyou PATH.")
+        print("Error: 'kubectl' command not found. Please ensure that kubectl is installed and in your PATH.")
         return None
     except subprocess.CalledProcessError as e:
         print(f"Error executing kubectl command: {e}")
         return None
-    
+
     try:
         return json.loads(result.stdout)
     except json.JSONDecodeError:
         print("Error: could not parse kubectl output as JSON.")
         return None
+
 
 def get_nodes():
     """
@@ -80,6 +86,7 @@ def get_node_status(node):
 
     return name, ready_status
 
+
 def get_pods():
     """
     Fetch all pods across all namespaces via `kubectl get pods -A -o json`.
@@ -88,6 +95,7 @@ def get_pods():
     (same failure modes/behavior as get_nodes()).
     """
     return run_kubectl(["get", "pods", "-A", "-o", "json"])
+
 
 def get_pod_status(pod):
     """
@@ -146,7 +154,6 @@ def get_events():
     return run_kubectl(["get", "events", "-A", "-o", "json"])
 
 
-
 def get_event_status(event):
     """
     Given a single event dict (one item from get_events()'s "items" list),
@@ -201,6 +208,7 @@ def build_event_reason_lookup(events):
 
     return lookup
 
+
 def run_kubectl_text(args):
     """
     Run a kubectl command and return its raw stdout as plain text
@@ -224,30 +232,33 @@ def run_kubectl_text(args):
     except subprocess.CalledProcessError as e:
         print(f"Error executing kubectl command: {e}")
         return None
-    
+
     return result.stdout
+
 
 def get_node_usage():
     """
     Fetch and parse `kubectl top nodes` output.
 
-    Returns a list of rows, eaach row a list:
+    Returns a list of rows, each row a list:
         [node_name, cpu_cores, cpu_percent, memory_bytes, memory_percent]
-    Returns an empty list if the command files or produce no data.
+
+    Returns an empty list if the command fails or produces no data.
     """
-    output = run_kubectl_text(["top","nodes"])
+    output = run_kubectl_text(["top", "nodes"])
     if output is None:
         return []
-    
+
     lines = output.strip().split("\n")
-    data_lines = lines[1:] #skip header row
+    data_lines = lines[1:]  # skip header row
 
     rows = []
     for line in data_lines:
         columns = line.split()
         rows.append(columns)
-    
+
     return rows
+
 
 def get_pod_usage():
     """
@@ -255,7 +266,7 @@ def get_pod_usage():
 
     Returns a list of rows, each row a list:
         [namespace, pod_name, cpu_cores, memory_bytes]
-    
+
     Returns an empty list if the command fails or produces no data.
     """
     output = run_kubectl_text(["top", "pods", "-A"])
@@ -263,7 +274,7 @@ def get_pod_usage():
         return []
 
     lines = output.strip().split("\n")
-    data_lines = lines[1:] # skip header row
+    data_lines = lines[1:]  # skip header row
 
     rows = []
     for line in data_lines:
@@ -271,6 +282,7 @@ def get_pod_usage():
         rows.append(columns)
 
     return rows
+
 
 def parse_cpu_millicores(cpu_str):
     """
@@ -281,6 +293,7 @@ def parse_cpu_millicores(cpu_str):
         return int(cpu_str[:-1])
     else:
         return int(cpu_str) * 1000
+
 
 def parse_memory_mi(mem_str):
     """
@@ -295,6 +308,7 @@ def parse_memory_mi(mem_str):
         return int(mem_str[:-2]) // 1024
     else:
         return 0
+
 
 def format_age(age):
     """
@@ -316,10 +330,14 @@ def format_age(age):
 
 
 if __name__ == "__main__":
-    # --- Nodes ---
+
+    # =========================================================
+    # NODES
+    # Fetch every node and print a simple Ready/Not Ready table.
+    # =========================================================
     data = get_nodes()
     if data is None:
-        exit(1)
+        exit(1)  # kubectl failed - get_nodes() already printed why
     nodes = data["items"]
 
     node_rows = []
@@ -331,14 +349,28 @@ if __name__ == "__main__":
 
     print()  # blank line between sections
 
-    # --- Events (fetched early so Pods can reference them) ---
+    # =========================================================
+    # EVENTS (fetched early)
+    # We need the event->reason lookup built BEFORE we process
+    # pods, since the Pods table below cross-references it to
+    # show "what's the most recent thing that went wrong" per pod.
+    # =========================================================
     events_data = get_events()
     if events_data is None:
         exit(1)
-    events = events_data["items"]
+    events = events_data["items"]  # raw list, reused again further down
     event_reason_lookup = build_event_reason_lookup(events)
 
-    # --- Pods ---
+    # =========================================================
+    # PODS
+    # A pod is only shown in this table if something is actually
+    # wrong with it right now:
+    #   - phase isn't Running/Succeeded, OR
+    #   - it's Running but has a recent Warning event tied to it
+    # Pods with no recent event are silently counted as healthy,
+    # even if their lifetime restart count is high - see README
+    # for why raw restart counts alone aren't a reliable signal.
+    # =========================================================
     pods_data = get_pods()
     if pods_data is None:
         exit(1)
@@ -352,12 +384,18 @@ if __name__ == "__main__":
 
     for pod in pods:
         pod_name, phase, restart_count, recent_restart, last_restart_age = get_pod_status(pod)
+
+        # Look up this pod's most recent Warning event, if any.
+        # .get() twice: first find the pod's entry (default {} if
+        # missing), then pull "reason" out of it (default "-").
         last_event_reason = event_reason_lookup.get(pod_name, {}).get("reason", "-")
         has_recent_event = last_event_reason != "-"
 
         if phase == "Running" and not has_recent_event:
+            # Fully healthy - nothing to show, just count it.
             running_count += 1
-        elif phase == "Running":            
+        elif phase == "Running":
+            # Running, but flagged because of a recent event.
             running_count += 1
             if last_restart_age is not None:
                 last_restart_text = format_age(last_restart_age)
@@ -368,8 +406,10 @@ if __name__ == "__main__":
             pending_count += 1
             pod_rows.append([pod_name, phase, "-", "-", last_event_reason])
         elif phase == "Succeeded":
+            # One-shot Jobs/CronJobs finishing normally - not a problem.
             succeeded_count += 1
         else:
+            # Anything else (e.g. Failed) - flag it.
             other_count += 1
             pod_rows.append([pod_name, phase, "-", "-", last_event_reason])
 
@@ -387,16 +427,21 @@ if __name__ == "__main__":
 
     print()  # blank line between sections
 
-    # --- Recent Warning Events (last hour) ---
+    # =========================================================
+    # RECENT WARNING EVENTS
+    # Independent of the Pods table above - this lists every
+    # Warning event (not just ones tied to a currently-Running
+    # pod) seen within the last RECENT_RESTART_HOURS.
+    # =========================================================
     event_rows = []
 
     for event in events:
         event_type, reason, count, last_timestamp_str, pod_name, namespace = get_event_status(event)
 
         if event_type != "Warning":
-            continue
+            continue  # skip Normal events entirely
         if last_timestamp_str is None:
-            continue
+            continue  # no timestamp to compare against, skip
 
         last_timestamp = datetime.fromisoformat(last_timestamp_str.replace("Z", "+00:00"))
         now = datetime.now(timezone.utc)
@@ -413,7 +458,12 @@ if __name__ == "__main__":
 
     print()  # blank line between sections
 
-    # --- Node Resource Usage ---
+    # =========================================================
+    # NODE RESOURCE USAGE
+    # Requires metrics-server to be running in the cluster.
+    # Just displays raw kubectl top output as a table, no
+    # filtering/sorting needed since there are only a few nodes.
+    # =========================================================
     usage_rows = get_node_usage()
     if usage_rows:
         print("Node Resource Usage:")
@@ -421,24 +471,34 @@ if __name__ == "__main__":
     else:
         print("Node usage data unavailable (metrics-server may be down).")
 
-    print() # blank line between sections
+    print()  # blank line between sections
 
-    # --- Top Pods by CPU/Memory Usage ---
+    # =========================================================
+    # TOP PODS BY CPU / MEMORY
+    # With ~78 pods, showing all of them would be noise, so we
+    # sort by usage (highest first) and only show the top N.
+    # CPU/memory values come back as strings with units baked in
+    # (e.g. "168m", "2745Mi"), so we convert them to plain integers
+    # via parse_cpu_millicores()/parse_memory_mi() just for sorting -
+    # the original formatted string is still what gets displayed.
+    # =========================================================
     pod_usage_rows = get_pod_usage()
 
     if pod_usage_rows:
+        # row[2] is the CPU column: [namespace, pod_name, cpu, memory]
         cpu_sorted = sorted(pod_usage_rows, key=lambda row: parse_cpu_millicores(row[2]), reverse=True)
-        top_cpu = cpu_sorted[:10]
+        top_cpu = cpu_sorted[:TOP_N_PODS]
 
-        print("Top 10 Pods by CPU:")
+        print(f"Top {TOP_N_PODS} Pods by CPU:")
         print(tabulate(top_cpu, headers=["NAMESPACE", "POD", "CPU", "MEMORY"], tablefmt="grid"))
 
         print()
 
+        # row[3] is the memory column
         mem_sorted = sorted(pod_usage_rows, key=lambda row: parse_memory_mi(row[3]), reverse=True)
-        top_mem = mem_sorted[:10]
+        top_mem = mem_sorted[:TOP_N_PODS]
 
-        print("Top 10 Pods by Memory:")
+        print(f"Top {TOP_N_PODS} Pods by Memory:")
         print(tabulate(top_mem, headers=["NAMESPACE", "POD", "CPU", "MEMORY"], tablefmt="grid"))
     else:
         print("Pod usage data unavailable (metrics-server may be down).")
