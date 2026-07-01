@@ -2,3 +2,7 @@
 *.env
 secrets/
 secrets/
+# Python
+venv/
+__pycache__/
+*.pyc
