@@ -12,13 +12,15 @@ menu letting you choose which section to view:
   6. PVC storage health
   7. Deployment/ReplicaSet health
   8. All of the above, in sequence
+  9. AI-generated summary via a local Ollama model
+  10. Run the unit test suite
 
 Any menu choice can also be run in "live mode", which clears the screen
 and re-runs that section every REFRESH_INTERVAL_SECONDS until you press
 Ctrl+C.
 
-Run with --hours/--top to override RECENT_RESTART_HOURS/TOP_N_PODS at
-the command line (see parse_args()).
+Run with --hours/--top/--namespace to override RECENT_RESTART_HOURS,
+TOP_N_PODS, and NAMESPACE at the command line (see parse_args()).
 """
 
 # modules
@@ -80,7 +82,8 @@ def parse_args():
     """
     Define and parse command-line arguments.
 
-    Returns an argparse.Namespace with .hours and .top attributes.
+    Returns an argparse.Namespace with .hours, .top, and .namespace
+    attributes.
     """
     parser = argparse.ArgumentParser(
         description="Homelab Kubernetes cluster health dashboard."
@@ -104,6 +107,18 @@ def parse_args():
         help="Limit results to a single namespace (default: all namespaces)"
     )
     return parser.parse_args()
+
+
+def namespace_args():
+    """
+    Return the kubectl argument(s) to scope a command by namespace,
+    based on the NAMESPACE global: ["-n", NAMESPACE] if set, or ["-A"]
+    for all namespaces otherwise.
+    """
+    if NAMESPACE:
+        return ["-n", NAMESPACE]
+    else:
+        return ["-A"]
 
 
 def get_nodes():
@@ -281,16 +296,6 @@ def run_kubectl_text(args):
 
     return result.stdout
 
-def namespace_args():
-    """
-    Return the kubectl argument(s) to scope a command by namespace,
-    based on the NAMESPACE global: ["-n", NAMESPACE] if set, or ["-A"]
-    for all namespaces otherwise.
-    """
-    if NAMESPACE:
-        return ["-n", NAMESPACE]
-    else:
-        return ["-A"]
 
 def get_node_usage():
     """
@@ -327,6 +332,18 @@ def get_pod_usage():
     Returns an empty list if the command fails or produces no data.
     """
     output = run_kubectl_text(["top", "pods"] + namespace_args())
+    if output is None:
+        return []
+
+    lines = output.strip().split("\n")
+    data_lines = lines[1:]  # skip header row
+
+    rows = []
+    for line in data_lines:
+        columns = line.split()
+        rows.append(columns)
+
+    return rows
 
 
 def get_pvcs():
@@ -689,6 +706,7 @@ def show_all():
     print()
     show_deployments()
 
+
 def gather_cluster_summary_text():
     """
     Gather cluster state into a single plain-text report, suitable for
@@ -766,6 +784,7 @@ def gather_cluster_summary_text():
 
     return "\n".join(lines)
 
+
 def show_ai_summary():
     """
     Gather cluster state as text, send it to a local Ollama model, and
@@ -798,6 +817,30 @@ def show_ai_summary():
     except Exception as e:
         print(f"Error getting summary from Ollama: {e}")
 
+
+def show_test_results():
+    """
+    Run the unit test suite (test_node_dashboard.py) and print the
+    results. Runs from this script's own directory, regardless of
+    what directory the user launched it from.
+    """
+    print("Running unit tests...\n")
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+
+    result = subprocess.run(
+        ["python3", "-m", "unittest", "test_node_dashboard.py", "-v"],
+        capture_output=True,
+        text=True,
+        cwd=script_dir
+    )
+
+    # unittest writes its pass/fail output to stderr by convention,
+    # not stdout - print both so nothing is missed.
+    print(result.stdout)
+    print(result.stderr)
+
+
 # Maps each menu number to the function that handles it. Values here
 # are the functions THEMSELVES (no parentheses) - not the result of
 # calling them. That's what lets us look one up by the user's choice
@@ -812,6 +855,7 @@ SECTION_FUNCTIONS = {
     "7": show_deployments,
     "8": show_all,
     "9": show_ai_summary,
+    "10": show_test_results,
 }
 
 
@@ -832,17 +876,19 @@ Cluster Dashboard
 7. Deployments
 8. All sections
 9. AI Summary (Ollama)
-10. Exit
+10. Run Tests
+11. Exit
 """)
     return input("Choose an option: ")
 
 
 if __name__ == "__main__":
-    # Parse --hours/--top once at startup. These get assigned to the
-    # same names used everywhere else in the file (RECENT_RESTART_HOURS,
-    # TOP_N_PODS), so every show_*() function automatically picks up
-    # the command-line values (or the defaults) without any further
-    # changes needed elsewhere.
+    # Parse --hours/--top/--namespace once at startup. These get
+    # assigned to the same names used everywhere else in the file
+    # (RECENT_RESTART_HOURS, TOP_N_PODS, NAMESPACE), so every
+    # show_*() function automatically picks up the command-line
+    # values (or the defaults) without any further changes needed
+    # elsewhere.
     args = parse_args()
     RECENT_RESTART_HOURS = args.hours
     TOP_N_PODS = args.top
@@ -857,13 +903,13 @@ if __name__ == "__main__":
         clear_screen()
         choice = show_menu()
 
-        if choice == "10":
+        if choice == "11":
             clear_screen()
             print("Goodbye!")
             break  # exits the while True loop, ending the program
 
         if choice not in SECTION_FUNCTIONS:
-            # Anything not in SECTION_FUNCTIONS (or "10" for Exit)
+            # Anything not in SECTION_FUNCTIONS (or "11" for Exit)
             # lands here instead of crashing - show a message, wait
             # for a key, then loop back around (via `continue`) to
             # redraw the menu.
