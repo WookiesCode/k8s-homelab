@@ -15,6 +15,7 @@ Events, and resource usage via kubectl, and prints a series of tables:
 # modules
 import subprocess
 import json
+import argparse
 from datetime import datetime, timezone
 from tabulate import tabulate
 
@@ -59,6 +60,28 @@ def run_kubectl(args):
         print("Error: could not parse kubectl output as JSON.")
         return None
 
+def parse_args():
+    """
+    Define and parse command-line arguments.
+
+    Returns an argparse.Namespace with .hours and .top attributes.
+    """
+    parser = argparse.ArgumentParser(
+        description="Homelab Kubernetes cluster health dashboard."
+    ) 
+    parser.add_argument(
+        "--hours",
+        type=float,
+        default=1,
+        help="How many hours back to look for recent restarts/events (default: 1)" 
+    )
+    parser.add_argument(
+        "--top",
+        type=int,
+        default=10,
+        help="How man pods to show in the Top CPU/Memory tables (default: 10)"
+    )
+    return parser.parse_args()
 
 def get_nodes():
     """
@@ -377,6 +400,9 @@ def format_age(age):
 
 
 if __name__ == "__main__":
+    args = parse_args()
+    RECENT_RESTART_HOURS = args.hours
+    TOP_N_PODS = args.top
 
     # =========================================================
     # NODES
