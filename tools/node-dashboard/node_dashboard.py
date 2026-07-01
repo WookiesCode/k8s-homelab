@@ -41,6 +41,7 @@ TOP_N_PODS = 10  # How many pods to show in the Top CPU / Top Memory usage table
 REFRESH_INTERVAL_SECONDS = 30  # How often to refresh in live mode
 OLLAMA_HOST = "http://10.10.10.8:11434"
 OLLAMA_MODEL = "ornith:35b"
+NAMESPACE = None  # Set from --namespace at startup; None means all namespaces
 
 
 def run_kubectl(args):
@@ -96,6 +97,12 @@ def parse_args():
         default=10,
         help="How many pods to show in the Top CPU/Memory tables (default: 10)"
     )
+    parser.add_argument(
+        "--namespace",
+        type=str,
+        default=None,
+        help="Limit results to a single namespace (default: all namespaces)"
+    )
     return parser.parse_args()
 
 
@@ -127,12 +134,13 @@ def get_node_status(node):
 
 def get_pods():
     """
-    Fetch all pods across all namespaces via `kubectl get pods -A -o json`.
+    Fetch pods (scoped by NAMESPACE, or all namespaces if unset) via
+    `kubectl get pods -o json`.
 
     Returns the parsed JSON as a dict on success, or None on failure
     (same failure modes/behavior as get_nodes()).
     """
-    return run_kubectl(["get", "pods", "-A", "-o", "json"])
+    return run_kubectl(["get", "pods"] + namespace_args() + ["-o", "json"])
 
 
 def get_pod_status(pod):
@@ -183,13 +191,13 @@ def get_pod_status(pod):
 
 def get_events():
     """
-    Fetch all Kubernetes Events across all namespaces via
-    `kubectl get events -A -o json`.
+    Fetch Events (scoped by NAMESPACE, or all namespaces if unset) via
+    `kubectl get events -o json`.
 
     Returns the parsed JSON as a dict on success, or None on failure
     (same failure modes/behavior as get_nodes()/get_pods()).
     """
-    return run_kubectl(["get", "events", "-A", "-o", "json"])
+    return run_kubectl(["get", "events"] + namespace_args() + ["-o", "json"])
 
 
 def get_event_status(event):
@@ -273,6 +281,16 @@ def run_kubectl_text(args):
 
     return result.stdout
 
+def namespace_args():
+    """
+    Return the kubectl argument(s) to scope a command by namespace,
+    based on the NAMESPACE global: ["-n", NAMESPACE] if set, or ["-A"]
+    for all namespaces otherwise.
+    """
+    if NAMESPACE:
+        return ["-n", NAMESPACE]
+    else:
+        return ["-A"]
 
 def get_node_usage():
     """
@@ -300,36 +318,25 @@ def get_node_usage():
 
 def get_pod_usage():
     """
-    Fetch and parse `kubectl top pods -A` output.
+    Fetch and parse `kubectl top pods` output, scoped by NAMESPACE or
+    all namespaces if unset.
 
     Returns a list of rows, each row a list:
         [namespace, pod_name, cpu_cores, memory_bytes]
 
     Returns an empty list if the command fails or produces no data.
     """
-    output = run_kubectl_text(["top", "pods", "-A"])
-    if output is None:
-        return []
-
-    lines = output.strip().split("\n")
-    data_lines = lines[1:]  # skip header row
-
-    rows = []
-    for line in data_lines:
-        columns = line.split()
-        rows.append(columns)
-
-    return rows
+    output = run_kubectl_text(["top", "pods"] + namespace_args())
 
 
 def get_pvcs():
     """
-    Fetch all PersistentVolumeClaims across all namespaces via
-    `kubectl get pvc -A -o json`.
+    Fetch PersistentVolumeClaims (scoped by NAMESPACE, or all namespaces
+    if unset) via `kubectl get pvc -o json`.
 
     Returns the parsed JSON as a dict on success, or None on failure.
     """
-    return run_kubectl(["get", "pvc", "-A", "-o", "json"])
+    return run_kubectl(["get", "pvc"] + namespace_args() + ["-o", "json"])
 
 
 def get_pvc_status(pvc):
@@ -351,12 +358,12 @@ def get_pvc_status(pvc):
 
 def get_deployments():
     """
-    Fetch all Deployments across all namespaces via
-    `kubectl get deployments -A -o json`.
+    Fetch Deployments (scoped by NAMESPACE, or all namespaces if unset)
+    via `kubectl get deployments -o json`.
 
     Returns the parsed JSON as a dict on success, or None on failure.
     """
-    return run_kubectl(["get", "deployments", "-A", "-o", "json"])
+    return run_kubectl(["get", "deployments"] + namespace_args() + ["-o", "json"])
 
 
 def get_deployment_status(deployment):
@@ -839,6 +846,7 @@ if __name__ == "__main__":
     args = parse_args()
     RECENT_RESTART_HOURS = args.hours
     TOP_N_PODS = args.top
+    NAMESPACE = args.namespace
 
     # Main menu loop. while True: runs forever until something inside
     # it explicitly stops it - here, that's one of the "break" calls
