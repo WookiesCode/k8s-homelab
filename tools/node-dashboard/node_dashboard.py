@@ -24,7 +24,6 @@ RED = "\033[91m"
 RESET = "\033[0m"
 
 # Restart Threshold for considering a pod unhealthy
-RESTART_THRESHOLD = 5
 RECENT_RESTART_HOURS = 1  # Number of hours to consider for recent restarts/events
 TOP_N_PODS = 10  # How many pods to show in the Top CPU / Top Memory usage tables
 
@@ -283,6 +282,54 @@ def get_pod_usage():
 
     return rows
 
+def get_pvcs():
+    """
+    Fetch all PersistentVolumeClaims across all namepaces via
+    `kubectl get pvc -A -o json`.
+
+    Returns the parsed JSON as a dict on success, or None on failure.
+    """
+    return run_kubectl(["get", "pvc", "-A", "-o", "json"])
+
+def get_pvc_status(pvc):
+    """
+    Given a single PVC dict (one item from get_pvcs()'s "items" list),
+    return (namespace/name, phase, storage_class, requested_storage).
+
+    phase is typically "Bound" (healthy), "Pending" (note yet bound),
+    or "Lost" (backing volume is gone).
+    """
+    name = pvc["metadata"]["name"]
+    namespace = pvc["metadata"]["namespace"]
+    phase = pvc["status"].get("phase", "Unknown")
+    storage_class = pvc["spec"].get("storageClassName", "-")
+    requested_storage = pvc["spec"].get("resources", {}).get("requests", {}).get("storage", "-")
+
+    return f"{namespace}/{name}", phase, storage_class, requested_storage
+
+def get_deployments():
+    """
+    Fetch all Deployments across all namespaces via
+    `kubectl get deployments -A -o json`.
+
+    Returns the parsed JSON as a dict on success, or None on failure.
+    """
+    return run_kubectl(["get", "deployments", "-A", "-o", "json"])
+
+def get_deployment_status(deployment):
+    """
+    Given a single deployment dict (one item from get_deployments()'s
+    "items" list), return (namespace/name, desired_replicas, ready_replicas).
+
+    A deployment intentionally scaled to 0 replicas is not a problem -
+    callers should only flag cases where desired > 0 but ready < desired.
+    """
+    name = deployment["metadata"]["name"]
+    namespace = deployment["metadata"]["namespace"]
+    desired_replicas = deployment["spec"].get("replicas", 0)
+    ready_replicas = deployment["status"].get("readyReplicas", 0)
+
+    return f"{namespace}/{name}", desired_replicas, ready_replicas    
 
 def parse_cpu_millicores(cpu_str):
     """
@@ -502,3 +549,69 @@ if __name__ == "__main__":
         print(tabulate(top_mem, headers=["NAMESPACE", "POD", "CPU", "MEMORY"], tablefmt="grid"))
     else:
         print("Pod usage data unavailable (metrics-server may be down).")
+    
+    print() # blank line between spaces
+
+    # =========================================================
+    # PERSISTENT VOLUME CLAIMS
+    # Only shows PVCs that aren't Bound - a Bound PVC is healthy
+    # and has nothing to report, so we skip it, same approach as
+    # the Pods table.
+    # =========================================================   
+
+    pvc_data = get_pvcs()
+    if pvc_data is None:
+        exit(1)
+    pvcs = pvc_data["items"]
+
+    bound_count = 0 
+    pvc_rows = []
+
+    for pvc in pvcs:
+        pvc_name, phase, storage_class, requested_storage = get_pvc_status(pvc)
+
+        if phase == "Bound":
+            bound_count += 1
+        else:
+            pvc_rows.append([pvc_name, phase, storage_class, requested_storage])
+    
+    print(f"PVCs: {bound_count} bound, {len(pvc_rows)} not bound")
+    print()
+
+    if pvc_rows:
+        print("Unbound PVCs:")
+        print(tabulate(pvc_rows, headers=["PVC", "PHASE", "STORAGE CLASS", "REQUESTED"], tablefmt="grid"))
+    else:
+        print("All PVCs are bound")
+
+    print()  # blank line between sections
+
+    # =========================================================
+    # DEPLOYMENTS
+    # Only flags deployments where desired replicas > 0 but
+    # fewer are actually ready - a deployment intentionally
+    # scaled to 0 (desired_replicas == 0) is not a problem.
+    # =========================================================
+    deployments_data = get_deployments()
+    if deployments_data is None:
+        exit(1)
+    deployments = deployments_data["items"]
+
+    healthy_deploy_count = 0
+    deployment_rows = []
+
+    for deployment in deployments:
+        deploy_name, desired_replicas, ready_replicas = get_deployment_status(deployment)
+
+        if desired_replicas == 0 or ready_replicas >= desired_replicas:
+            healthy_deploy_count += 1
+        else:
+            deployment_rows.append([deploy_name, desired_replicas, ready_replicas])
+    print(f"Deployments: {healthy_deploy_count} healthy, {len(deployment_rows)} degraded")
+    print()
+
+    if deployment_rows:
+        print("Degraded Deployments:")
+        print(tabulate(deployment_rows, headers=["DEPLOYMENT", "DESIRED", "READY"], tablefmt="grid"))
+    else:
+        print("All deployments are healthy.")
