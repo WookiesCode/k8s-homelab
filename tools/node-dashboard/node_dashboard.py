@@ -30,6 +30,7 @@ import argparse
 import os
 import time
 import ollama
+import sys
 from datetime import datetime, timezone
 from tabulate import tabulate
 
@@ -105,6 +106,13 @@ def parse_args():
         type=str,
         default=None,
         help="Limit results to a single namespace (default: all namespaces)"
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Run all health checks once, print results, and exit "
+             "(non-zero exit code if any problems found). Skips the "
+             "interactive menu - suitable for cron."
     )
     return parser.parse_args()
 
@@ -840,6 +848,70 @@ def show_test_results():
     print(result.stdout)
     print(result.stderr)
 
+def run_health_check():
+    """
+    Run all core health checks once (Nodes, Pods, PVCs, Deployments)
+    and print one line per problem found - no tables, suitable for
+    cron/log output. Skips usage stats, AI summary, and tests, since
+    those aren't pass/fail health signals.
+
+    Returns True if everything is healthy, False if any problems
+    were found.
+    """
+    problems_found = False
+
+    # --- Nodes ---
+    data = get_nodes()
+    if data is not None:
+        for node in data["items"]:
+            name, ready_status = get_node_status(node)
+            if ready_status != "True":
+                problems_found = True
+                print(f"NODE PROBLEM: {name} is not Ready (status={ready_status})")
+
+    # --- Pods (reuses the same event cross-referencing as show_pods()) ---
+    events_data = get_events()
+    events = events_data["items"] if events_data is not None else []
+    event_reason_lookup = build_event_reason_lookup(events)
+
+    pods_data = get_pods()
+    if pods_data is not None:
+        for pod in pods_data["items"]:
+            pod_name, phase, restart_count, recent_restart, last_restart_age = get_pod_status(pod)
+            last_event_reason = event_reason_lookup.get(pod_name, {}).get("reason", "-")
+            has_recent_event = last_event_reason != "-"
+
+            if phase == "Running" and not has_recent_event:
+                continue
+            if phase == "Succeeded":
+                continue
+
+            problems_found = True
+            print(f"POD PROBLEM: {pod_name} (phase={phase}, last_event={last_event_reason})")
+
+    # --- PVCs ---
+    pvc_data = get_pvcs()
+    if pvc_data is not None:
+        for pvc in pvc_data["items"]:
+            pvc_name, phase, storage_class, requested_storage = get_pvc_status(pvc)
+            if phase != "Bound":
+                problems_found = True
+                print(f"PVC PROBLEM: {pvc_name} (phase={phase})")
+
+    # --- Deployments ---
+    deployments_data = get_deployments()
+    if deployments_data is not None:
+        for deployment in deployments_data["items"]:
+            deploy_name, desired_replicas, ready_replicas = get_deployment_status(deployment)
+            if desired_replicas == 0 or ready_replicas >= desired_replicas:
+                continue
+            problems_found = True
+            print(f"DEPLOYMENT PROBLEM: {deploy_name} ({ready_replicas}/{desired_replicas} ready)")
+
+    if not problems_found:
+        print("All checks passed - cluster looks healthy.")
+
+    return not problems_found
 
 # Maps each menu number to the function that handles it. Values here
 # are the functions THEMSELVES (no parentheses) - not the result of
@@ -893,6 +965,10 @@ if __name__ == "__main__":
     RECENT_RESTART_HOURS = args.hours
     TOP_N_PODS = args.top
     NAMESPACE = args.namespace
+
+    if args.check:
+        healthy = run_health_check()
+        sys.exit(0 if healthy else 1)
 
     # Main menu loop. while True: runs forever until something inside
     # it explicitly stops it - here, that's one of the "break" calls
